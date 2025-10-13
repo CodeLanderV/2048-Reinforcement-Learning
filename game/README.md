@@ -81,3 +81,13 @@ Install:
 ```bash
 pip install numpy pygame
 ```
+┌─────────────────┐
+│  game_logic.py  │ ← Pure Python/NumPy
+│  (Model)        │ ← No Pygame dependency
+└────────┬────────┘
+         │
+         ↓
+┌─────────────────┐
+│   game_ui.py    │ ← Pygame rendering
+│  (View/Control) │ ← Uses game_logic
+└─────────────────┘
