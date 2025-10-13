@@ -10,14 +10,6 @@ A comprehensive Reinforcement Learning project for training and comparing differ
 
 To design, build, and train Reinforcement Learning agents capable of playing the game 2048. The primary focus is on building a robust, modular architecture from the ground up to facilitate the comparison of multiple RL algorithms.
 
-## 🚀 Features
-
-- **Multiple RL Algorithms**: Implementations of DQN, PPO, A3C, Rainbow, and more
-- **Modular Architecture**: Easy to extend and experiment with new algorithms
-- **Comprehensive Evaluation**: Built-in metrics and comparison tools
-- **Visual Interface**: Pygame-based rendering for watching agent gameplay
-- **Experiment Tracking**: Integration with TensorBoard and Weights & Biases
-- **Configurable**: YAML-based configuration system for easy experimentation
 
 ## 🛠️ Tech Stack
 
