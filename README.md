@@ -60,16 +60,11 @@ To design, build, and train Reinforcement Learning agents capable of playing the
 
 ### Implemented
 - [ ] **DQN** (Deep Q-Network)
-- [ ] **Double DQN**
+~_- [ ] **Double DQN**
 - [ ] **Dueling DQN**
 - [ ] **PPO** (Proximal Policy Optimization)
 - [ ] **A3C** (Asynchronous Advantage Actor-Critic)
-- [ ] **Rainbow DQN**
-
-### Planned
-- [ ] **SAC** (Soft Actor-Critic)
-- [ ] **TD3** (Twin Delayed DDPG)
-- [ ] **AlphaZero-style** approach
+- [ ] **Rainbow DQN**_~
 
 ## 📈 Results
 
