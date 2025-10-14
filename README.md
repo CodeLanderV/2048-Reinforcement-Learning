@@ -1,3 +1,5 @@
+# THIS BRANCH IS NOT TO BE VIBE CODED AND HAS TO BE IMPLEMENTED YOURSELF.
+
 # 2048 Reinforcement Learning Agent
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
