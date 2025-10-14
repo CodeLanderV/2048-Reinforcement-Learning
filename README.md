@@ -207,7 +207,7 @@ Input (16 values) → FC(256) → ReLU → FC(256) → ReLU → FC(4 actions)
 - Better performance on complex tasks
 - Same computational cost as DQN
 
-### 3. Policy Gradient (REINFORCE)
+### 3. Policy Gradient
 
 **Type**: Policy-based reinforcement learning
 
