@@ -195,15 +195,17 @@ def tune_hyperparameters(algorithm: str, n_trials: int = 30, tune_episodes: int 
         
         if algorithm in ['dqn', 'double-dqn']:
             # Sample DQN hyperparameters
+            hidden_choice = trial.suggest_categorical("hidden_architecture", [0, 1, 2])
+            hidden_options = [(128, 128), (256, 256), (512, 256)]
+            
             config = {
-                "learning_rate": trial.suggest_loguniform("learning_rate", 1e-5, 1e-3),
-                "gamma": trial.suggest_uniform("gamma", 0.95, 0.999),
+                "learning_rate": trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True),
+                "gamma": trial.suggest_float("gamma", 0.95, 0.999),
                 "batch_size": trial.suggest_categorical("batch_size", [32, 64, 128, 256]),
-                "epsilon_end": trial.suggest_uniform("epsilon_end", 0.01, 0.15),
+                "epsilon_end": trial.suggest_float("epsilon_end", 0.01, 0.15),
                 "epsilon_decay": trial.suggest_int("epsilon_decay", 50000, 150000),
                 "replay_buffer_size": trial.suggest_categorical("replay_buffer_size", [50000, 100000]),
-                "hidden_dims": trial.suggest_categorical("hidden_dims", 
-                                                        [(128, 128), (256, 256), (512, 256)]),
+                "hidden_dims": hidden_options[hidden_choice],
             }
             
             # Quick DQN training
@@ -253,12 +255,14 @@ def tune_hyperparameters(algorithm: str, n_trials: int = 30, tune_episodes: int 
             
         else:  # reinforce
             # Sample REINFORCE hyperparameters
+            hidden_choice = trial.suggest_categorical("hidden_architecture", [0, 1, 2])
+            hidden_options = [[128, 128], [256, 256], [512, 256]]
+            
             config = {
-                "learning_rate": trial.suggest_loguniform("learning_rate", 1e-5, 1e-2),
-                "gamma": trial.suggest_uniform("gamma", 0.95, 0.999),
-                "hidden_dims": trial.suggest_categorical("hidden_dims", 
-                                                        [[128, 128], [256, 256], [512, 256]]),
-                "entropy_coef": trial.suggest_loguniform("entropy_coef", 1e-4, 1e-1),
+                "learning_rate": trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True),
+                "gamma": trial.suggest_float("gamma", 0.95, 0.999),
+                "hidden_dims": hidden_options[hidden_choice],
+                "entropy_coef": trial.suggest_float("entropy_coef", 1e-4, 1e-1, log=True),
             }
             
             from src.agents.reinforce import REINFORCEAgent, REINFORCEConfig
