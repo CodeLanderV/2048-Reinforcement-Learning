@@ -189,7 +189,7 @@ Notes:              {notes}
         
         # Also print to console
         print(log_entry)
-        print(f"✅ Evaluation logged to: {self.log_file}")
+        print(f"[LOG] Evaluation logged to: {self.log_file}")
     
     def log_evaluation(
         self,

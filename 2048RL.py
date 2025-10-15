@@ -7,23 +7,67 @@ This file provides a simple interface to train and evaluate different RL
 algorithms for playing 2048. Just modify CONFIG and run!
 
 QUICK START:
-    python 2048RL.py train --algorithm dqn --episodes 2000
+    python 2048RL.py train --algorithm dqn --episodes 3000
     python 2048RL.py play --model models/DQN/dqn_final.pth
 
 ALGORITHMS AVAILABLE:
     - DQN:         Deep Q-Network (value-based, off-policy)
     - Double-DQN:  Reduces Q-value overestimation
     - MCTS:        Monte Carlo Tree Search (planning, no learning)
-    - Policy-Grad: Direct policy optimization (not yet implemented)
+    - REINFORCE:   Monte Carlo Policy Gradient (on-policy learning)
 """
 
 import sys
 import warnings
+import logging
+import json
 from pathlib import Path
+from datetime import datetime
 
 # Setup Python path and suppress numpy warnings
 sys.path.insert(0, str(Path(__file__).parent))
 warnings.filterwarnings('ignore', category=RuntimeWarning)
+
+# Try importing Optuna (optional for hyperparameter tuning)
+try:
+    import optuna
+    OPTUNA_AVAILABLE = True
+except ImportError:
+    OPTUNA_AVAILABLE = False
+
+# Setup logging to capture all output
+def setup_logging():
+    """Setup logging to both console and file."""
+    log_dir = Path(__file__).parent / "evaluations"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / "logs.txt"
+    
+    # Create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Setup file handler
+    file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    
+    # Setup console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    
+    # Setup root logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+# Initialize logging
+logger = setup_logging()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -34,10 +78,11 @@ CONFIG = {
     # ─────────────────────────────────────────────────────────────────────
     # General Training Settings
     # ─────────────────────────────────────────────────────────────────────
-    "algorithm": "dqn",         # Which algorithm: "dqn", "double-dqn", "mcts"
-    "episodes": 2000,           # How many games to train on
+    "algorithm": "dqn",         # Which algorithm: "dqn", "double-dqn", "mcts", "reinforce"
+    "episodes": 3000,           # How many games to train on (default: 3000)
     "enable_ui": True,          # Show pygame window? (slower but fun to watch)
     "enable_plots": True,       # Show live training graphs?
+    "hyperparameter_tuning": False,  # Enable hyperparameter search
     
     # ─────────────────────────────────────────────────────────────────────
     # DQN Hyperparameters (Standard Deep Q-Network)
@@ -90,6 +135,17 @@ CONFIG = {
     },
     
     # ─────────────────────────────────────────────────────────────────────
+    # REINFORCE Hyperparameters (Monte Carlo Policy Gradient)
+    # ─────────────────────────────────────────────────────────────────────
+    "reinforce": {
+        "learning_rate": 0.001,         # Policy network learning rate
+        "gamma": 0.99,                  # Discount factor for returns
+        "hidden_dims": [256, 256],      # Policy network architecture
+        "use_baseline": True,           # Subtract baseline to reduce variance
+        "entropy_coef": 0.01,           # Entropy regularization (encourages exploration)
+    },
+    
+    # ─────────────────────────────────────────────────────────────────────
     # Environment & Saving
     # ─────────────────────────────────────────────────────────────────────
     "invalid_move_penalty": -10.0,      # Punishment for invalid moves (prevents getting stuck)
@@ -97,6 +153,174 @@ CONFIG = {
     "checkpoint_interval": 100,         # Save model every N episodes
     "eval_episodes": 5,                 # Games to play during evaluation
 }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HYPERPARAMETER TUNING WITH OPTUNA
+# ═══════════════════════════════════════════════════════════════════════════
+
+def tune_hyperparameters(algorithm: str, n_trials: int = 30, tune_episodes: int = 200):
+    """
+    Run Optuna hyperparameter optimization with short training runs.
+    
+    Uses quick 200-episode training sessions to evaluate different hyperparameter
+    combinations, then returns the best configuration to use for full training.
+    
+    Args:
+        algorithm: 'dqn', 'double-dqn', or 'reinforce'
+        n_trials: Number of Optuna trials to run
+        tune_episodes: Episodes per trial (kept short for speed)
+    
+    Returns:
+        dict: Best hyperparameters found
+    """
+    if not OPTUNA_AVAILABLE:
+        print("[ERROR] Optuna not installed. Install with: pip install optuna")
+        print("[INFO] Skipping hyperparameter tuning, using default CONFIG values")
+        return None
+    
+    import numpy as np
+    from src.environment import GameEnvironment, EnvironmentConfig, ACTIONS
+    
+    print("=" * 80)
+    print(f"HYPERPARAMETER TUNING: {algorithm.upper()}")
+    print("=" * 80)
+    print(f"Method: Optuna TPE Sampler")
+    print(f"Trials: {n_trials}")
+    print(f"Episodes per trial: {tune_episodes} (short runs for speed)")
+    print("=" * 80)
+    
+    def objective(trial: optuna.Trial) -> float:
+        """Optuna objective function - trains agent and returns score."""
+        
+        if algorithm in ['dqn', 'double-dqn']:
+            # Sample DQN hyperparameters
+            config = {
+                "learning_rate": trial.suggest_loguniform("learning_rate", 1e-5, 1e-3),
+                "gamma": trial.suggest_uniform("gamma", 0.95, 0.999),
+                "batch_size": trial.suggest_categorical("batch_size", [32, 64, 128, 256]),
+                "epsilon_end": trial.suggest_uniform("epsilon_end", 0.01, 0.15),
+                "epsilon_decay": trial.suggest_int("epsilon_decay", 50000, 150000),
+                "replay_buffer_size": trial.suggest_categorical("replay_buffer_size", [50000, 100000]),
+                "hidden_dims": trial.suggest_categorical("hidden_dims", 
+                                                        [(128, 128), (256, 256), (512, 256)]),
+            }
+            
+            # Quick DQN training
+            from src.agents.dqn import DQNAgent, DQNModelConfig, AgentConfig
+            from src.agents.double_dqn import DoubleDQNAgent, DoubleDQNModelConfig, DoubleDQNAgentConfig
+            
+            if algorithm == "double-dqn":
+                model_config = DoubleDQNModelConfig(output_dim=len(ACTIONS), hidden_dims=config["hidden_dims"])
+                agent_config = DoubleDQNAgentConfig(
+                    gamma=config["gamma"], batch_size=config["batch_size"],
+                    learning_rate=config["learning_rate"], epsilon_start=1.0,
+                    epsilon_end=config["epsilon_end"], epsilon_decay=config["epsilon_decay"],
+                    target_update_interval=1000, replay_buffer_size=config["replay_buffer_size"],
+                    gradient_clip=5.0
+                )
+                agent = DoubleDQNAgent(model_config, agent_config, ACTIONS)
+            else:
+                model_config = DQNModelConfig(output_dim=len(ACTIONS), hidden_dims=config["hidden_dims"])
+                agent_config = AgentConfig(
+                    gamma=config["gamma"], batch_size=config["batch_size"],
+                    learning_rate=config["learning_rate"], epsilon_start=1.0,
+                    epsilon_end=config["epsilon_end"], epsilon_decay=config["epsilon_decay"],
+                    target_update_interval=1000, replay_buffer_size=config["replay_buffer_size"],
+                    gradient_clip=5.0
+                )
+                agent = DQNAgent(model_config, agent_config, ACTIONS)
+            
+            env_config = EnvironmentConfig(enable_ui=False, invalid_move_penalty=-100)
+            env = GameEnvironment(env_config)
+            
+            scores = []
+            for ep in range(tune_episodes):
+                state = env.reset()
+                done = False
+                while not done:
+                    action = agent.select_action(state)
+                    result = env.step(action)
+                    agent.store_transition(state, action, result.reward, result.state, result.done)
+                    if agent.can_optimize():
+                        agent.optimize_model()
+                    state = result.state
+                    done = result.done
+                scores.append(env.get_state()['score'])
+            
+            env.close()
+            avg_score = float(np.mean(scores[-50:]))
+            
+        else:  # reinforce
+            # Sample REINFORCE hyperparameters
+            config = {
+                "learning_rate": trial.suggest_loguniform("learning_rate", 1e-5, 1e-2),
+                "gamma": trial.suggest_uniform("gamma", 0.95, 0.999),
+                "hidden_dims": trial.suggest_categorical("hidden_dims", 
+                                                        [[128, 128], [256, 256], [512, 256]]),
+                "entropy_coef": trial.suggest_loguniform("entropy_coef", 1e-4, 1e-1),
+            }
+            
+            from src.agents.reinforce import REINFORCEAgent, REINFORCEConfig
+            
+            agent = REINFORCEAgent(
+                state_dim=16, action_dim=4,
+                config=REINFORCEConfig(
+                    learning_rate=config["learning_rate"], gamma=config["gamma"],
+                    hidden_dims=config["hidden_dims"], use_baseline=True,
+                    entropy_coef=config["entropy_coef"]
+                )
+            )
+            
+            env_config = EnvironmentConfig(enable_ui=False, invalid_move_penalty=-100)
+            env = GameEnvironment(env_config)
+            
+            scores = []
+            for ep in range(tune_episodes):
+                state, _ = env.reset()
+                done = False
+                while not done:
+                    action = agent.select_action(state, env.board)
+                    next_state, reward, done, _, _ = env.step(ACTIONS[action])
+                    agent.store_transition(state, action, reward, next_state, done)
+                    state = next_state
+                agent.finish_episode()
+                scores.append(env.board.score)
+            
+            env.close()
+            avg_score = float(np.mean(scores[-50:]))
+        
+        print(f"[TRIAL {trial.number + 1}/{n_trials}] Score: {avg_score:.2f}")
+        return avg_score
+    
+    # Run Optuna optimization
+    study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=42))
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+    
+    # Display and save results
+    print(f"\n{'='*80}")
+    print(f"BEST HYPERPARAMETERS FOUND")
+    print(f"{'='*80}")
+    print(f"Best Score: {study.best_value:.2f}")
+    for key, value in study.best_params.items():
+        print(f"  {key}: {value}")
+    print(f"{'='*80}\n")
+    
+    # Save to file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_file = Path("evaluations") / f"optuna_{algorithm}_{timestamp}.json"
+    results_file.parent.mkdir(exist_ok=True)
+    with open(results_file, "w") as f:
+        json.dump({
+            "algorithm": algorithm,
+            "best_score": study.best_value,
+            "best_params": study.best_params,
+            "n_trials": n_trials,
+            "timestamp": timestamp
+        }, f, indent=2)
+    print(f"[SAVE] Tuning results saved to: {results_file}\n")
+    
+    return study.best_params
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -144,7 +368,7 @@ def train_dqn_variant(algorithm="dqn"):
         raise ValueError(f"Unknown algorithm: {algorithm}")
     
     print("=" * 80)
-    print(f"🎮 TRAINING {algo_name} AGENT")
+    print(f"TRAINING {algo_name} AGENT")
     print("=" * 80)
     
     # ─────────────────────────────────────────────────────────────────────
@@ -195,9 +419,9 @@ def train_dqn_variant(algorithm="dqn"):
     save_dir = Path(CONFIG["save_dir"]) / save_subdir
     episodes = CONFIG["episodes"]
     
-    print(f"\n📊 Training for {episodes} episodes")
-    print(f"💾 Models will be saved to: {save_dir}")
-    print(f"🎯 Close plot window to stop early\n")
+    print(f"\nTraining for {episodes} episodes")
+    print(f"Models will be saved to: {save_dir}")
+    print(f"Close plot window to stop early\n")
     
     best_score = 0
     best_tile = 0
@@ -264,7 +488,7 @@ def train_dqn_variant(algorithm="dqn"):
                 save_dir.mkdir(parents=True, exist_ok=True)
                 checkpoint_path = save_dir / f"{save_prefix}_ep{episode}.pth"
                 agent.save(checkpoint_path, episode)
-                print(f"💾 Checkpoint saved: {checkpoint_path}")
+                print(f"[CHECKPOINT] Saved: {checkpoint_path}")
             
             # Update live plot
             if CONFIG["enable_plots"] and episode % 5 == 0:
@@ -276,11 +500,11 @@ def train_dqn_variant(algorithm="dqn"):
                 
                 # Check if user closed plot window (early stop)
                 if not plt.fignum_exists(fig.number):
-                    print("\n⚠️  Plot closed - stopping early")
+                    print("\n[WARNING] Plot closed - stopping early")
                     break
     
     except KeyboardInterrupt:
-        print("\n\n⚠️  Training interrupted by user")
+        print("\n\n[WARNING] Training interrupted by user")
     
     # ─────────────────────────────────────────────────────────────────────
     # Training Complete: Save and Log Results
@@ -292,7 +516,14 @@ def train_dqn_variant(algorithm="dqn"):
         save_dir.mkdir(parents=True, exist_ok=True)
         final_path = save_dir / f"{save_prefix}_final.pth"
         agent.save(final_path, episode)
-        print(f"\n💾 Final model saved: {final_path}")
+        print(f"\n[SAVE] Final model saved: {final_path}")
+        
+        # Save training plots
+        if CONFIG["enable_plots"] and plt.fignum_exists(fig.number):
+            plot_path = Path("evaluations") / f"{algo_name.replace(' ', '_')}_training_plot.png"
+            plot_path.parent.mkdir(exist_ok=True)
+            fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+            print(f"[SAVE] Training plot saved: {plot_path}")
         
         # Log evaluation to file
         logger = EvaluationLogger()
@@ -306,7 +537,7 @@ def train_dqn_variant(algorithm="dqn"):
             final_score=best_score,
             training_time=timer.elapsed_str(),
             model_path=str(final_path),
-            notes=f"LR={cfg['learning_rate']}, ε_end={cfg['epsilon_end']}, ε_decay={cfg['epsilon_decay']}"
+            notes=f"LR={cfg['learning_rate']}, epsilon_end={cfg['epsilon_end']}, epsilon_decay={cfg['epsilon_decay']}"
         )
         
         # Cleanup
@@ -317,10 +548,10 @@ def train_dqn_variant(algorithm="dqn"):
         
         # Print summary
         print(f"\n{'='*80}")
-        print(f"✅ Training Complete!")
-        print(f"⏱️  Total Time: {timer.elapsed_str()}")
-        print(f"🏆 Best Score: {best_score}")
-        print(f"🎯 Best Tile: {best_tile}")
+        print(f"Training Complete!")
+        print(f"Total Time: {timer.elapsed_str()}")
+        print(f"Best Score: {best_score}")
+        print(f"Best Tile: {best_tile}")
         print(f"{'='*80}\n")
 
 
@@ -371,7 +602,7 @@ def train_mcts():
     from src.utils import TrainingTimer, EvaluationLogger
     
     print("=" * 80)
-    print("🎮 RUNNING MCTS SIMULATIONS")
+    print("RUNNING MCTS SIMULATIONS")
     print("=" * 80)
     
     # ─────────────────────────────────────────────────────────────────────
@@ -397,7 +628,7 @@ def train_mcts():
     episode_steps = []
     
     episodes = CONFIG["episodes"]
-    print(f"\n📊 Running {episodes} MCTS simulations")
+    print(f"\nRunning {episodes} MCTS simulations")
     print(f"🌲 {cfg['simulations']} tree searches per move\n")
     
     best_score = 0
@@ -447,7 +678,7 @@ def train_mcts():
                 )
     
     except KeyboardInterrupt:
-        print("\n\n⚠️  Simulation interrupted")
+        print("\n\n[WARNING] Simulation interrupted")
     
     # ─────────────────────────────────────────────────────────────────────
     # Complete: Log Results (no model to save)
@@ -474,23 +705,197 @@ def train_mcts():
         
         # Print summary
         print(f"\n{'='*80}")
-        print(f"✅ MCTS Simulation Complete!")
-        print(f"⏱️  Total Time: {timer.elapsed_str()}")
-        print(f"🏆 Best Score: {best_score}")
-        print(f"🎯 Best Tile: {best_tile}")
-        print(f"📊 Avg Score: {np.mean(episode_scores):.1f}")
-        print(f"📊 Avg Tile: {np.mean(episode_max_tiles):.1f}")
+        print(f"MCTS Simulation Complete!")
+        print(f"Total Time: {timer.elapsed_str()}")
+        print(f"Best Score: {best_score}")
+        print(f"Best Tile: {best_tile}")
+        print(f"Avg Score: {np.mean(episode_scores):.1f}")
+        print(f"Avg Tile: {np.mean(episode_max_tiles):.1f}")
         print(f"{'='*80}\n")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# POLICY GRADIENT TRAINING (TODO)
+# REINFORCE TRAINING (Monte Carlo Policy Gradient)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def train_policy_gradient():
-    """Train Policy Gradient agent (not yet implemented)."""
-    print("⚠️  Policy Gradient training not yet implemented!")
-    print("This requires implementing the PolicyGradientAgent in src/agents/policy_gradient/")
+def train_reinforce():
+    """
+    Train REINFORCE (Policy Gradient) agent.
+    
+    Key difference from DQN:
+    - Learns a stochastic policy π(a|s) that outputs action probabilities
+    - Updates after full episodes (Monte Carlo)
+    - On-policy: learns from its own experience only
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from src.environment import GameEnvironment, EnvironmentConfig, ACTIONS
+    from src.agents.reinforce import REINFORCEAgent, REINFORCEConfig
+    from src.utils import TrainingTimer, EvaluationLogger
+    
+    print("=" * 80)
+    print("TRAINING: REINFORCE (Monte Carlo Policy Gradient)")
+    print("=" * 80)
+    
+    # ─────────────────────────────────────────────────────────────────────
+    # Setup: Agent and Environment
+    # ─────────────────────────────────────────────────────────────────────
+    timer = TrainingTimer().start()
+    
+    cfg = CONFIG["reinforce"]
+    agent = REINFORCEAgent(
+        state_dim=16,
+        action_dim=4,
+        config=REINFORCEConfig(
+            learning_rate=cfg["learning_rate"],
+            gamma=cfg["gamma"],
+            hidden_dims=cfg["hidden_dims"],
+            use_baseline=cfg["use_baseline"],
+            entropy_coef=cfg["entropy_coef"]
+        )
+    )
+    
+    env_config = EnvironmentConfig(
+        enable_ui=CONFIG["enable_ui"],
+        invalid_move_penalty=CONFIG["invalid_move_penalty"]
+    )
+    env = GameEnvironment(env_config)
+    
+    # ─────────────────────────────────────────────────────────────────────
+    # Setup: Save directory and plotting
+    # ─────────────────────────────────────────────────────────────────────
+    save_dir = Path(CONFIG["save_dir"]) / "REINFORCE"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    
+    if CONFIG["enable_plots"]:
+        plt.ion()
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+        fig.suptitle('REINFORCE Training Progress')
+    
+    # ─────────────────────────────────────────────────────────────────────
+    # Tracking variables
+    # ─────────────────────────────────────────────────────────────────────
+    episode_rewards = []
+    episode_scores = []
+    episode_max_tiles = []
+    best_score = 0
+    best_tile = 0
+    
+    episodes = CONFIG["episodes"]
+    checkpoint_interval = CONFIG["checkpoint_interval"]
+    
+    # ─────────────────────────────────────────────────────────────────────
+    # Training Loop
+    # ─────────────────────────────────────────────────────────────────────
+    print(f"\nTraining for {episodes} episodes...")
+    print(f"Checkpoints saved to: {save_dir}")
+    print(f"Updates: After each episode (Monte Carlo)")
+    print(f"Policy: Stochastic (samples from policy distribution)\n")
+    
+    for episode in range(1, episodes + 1):
+        state, _ = env.reset()
+        episode_reward = 0
+        done = False
+        
+        # ─────────────────────────────────────────────────────────────────
+        # Play full episode
+        # ─────────────────────────────────────────────────────────────────
+        while not done:
+            action = agent.select_action(state, env.board)
+            next_state, reward, done, _, info = env.step(ACTIONS[action])
+            
+            # Store transition
+            agent.store_transition(state, action, reward, next_state, done)
+            
+            state = next_state
+            episode_reward += reward
+        
+        # ─────────────────────────────────────────────────────────────────
+        # Update policy after episode completes (REINFORCE requirement)
+        # ─────────────────────────────────────────────────────────────────
+        agent.finish_episode()
+        
+        # ─────────────────────────────────────────────────────────────────
+        # Track metrics
+        # ─────────────────────────────────────────────────────────────────
+        episode_rewards.append(episode_reward)
+        episode_scores.append(env.board.score)
+        episode_max_tiles.append(env.board.max_tile())
+        
+        if env.board.score > best_score:
+            best_score = env.board.score
+        if env.board.max_tile() > best_tile:
+            best_tile = env.board.max_tile()
+        
+        # ─────────────────────────────────────────────────────────────────
+        # Logging and visualization
+        # ─────────────────────────────────────────────────────────────────
+        if episode % 10 == 0:
+            avg_reward_last_10 = np.mean(episode_rewards[-10:])
+            avg_score_last_10 = np.mean(episode_scores[-10:])
+            avg_tile_last_10 = np.mean(episode_max_tiles[-10:])
+            
+            print(f"Episode {episode:4d} | "
+                  f"Reward: {episode_reward:7.1f} | "
+                  f"Score: {env.board.score:6.0f} | "
+                  f"MaxTile: {env.board.max_tile():4d} | "
+                  f"Avg(10): R={avg_reward_last_10:6.1f} S={avg_score_last_10:6.0f} T={avg_tile_last_10:4.0f}")
+        
+        # Update plots
+        if CONFIG["enable_plots"] and episode % 20 == 0:
+            _update_training_plot(ax1, ax2, episode_rewards, episode_scores, 
+                                episode_max_tiles, "REINFORCE")
+            plt.pause(0.01)
+        
+        # ─────────────────────────────────────────────────────────────────
+        # Save checkpoints
+        # ─────────────────────────────────────────────────────────────────
+        if episode % checkpoint_interval == 0:
+            agent.save(save_dir, episode)
+    
+    # ─────────────────────────────────────────────────────────────────────
+    # Final save and evaluation
+    # ─────────────────────────────────────────────────────────────────────
+    timer.stop()
+    
+    final_path = save_dir / "reinforce_final.pth"
+    agent.save(save_dir, "final")
+    
+    # Save training plots
+    if CONFIG["enable_plots"] and plt.fignum_exists(fig.number):
+        plot_path = Path("evaluations") / "REINFORCE_training_plot.png"
+        plot_path.parent.mkdir(exist_ok=True)
+        fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+        print(f"\n[SAVE] Training plot saved: {plot_path}")
+    
+    # Log training results
+    logger = EvaluationLogger()
+    final_avg_reward = float(np.mean(episode_rewards[-100:])) if episode_rewards else 0.0
+    
+    logger.log_training(
+        algorithm="REINFORCE",
+        episodes=episodes,
+        final_avg_reward=final_avg_reward,
+        max_tile=best_tile,
+        final_score=best_score,
+        training_time=timer.elapsed_str(),
+        model_path=str(final_path),
+        notes=f"LR={cfg['learning_rate']}, gamma={cfg['gamma']}, entropy={cfg['entropy_coef']}"
+    )
+    
+    # Cleanup
+    env.close()
+    if CONFIG["enable_plots"]:
+        plt.ioff()
+        plt.close('all')
+    
+    # Print summary
+    print(f"\n{'='*80}")
+    print(f"Training Complete!")
+    print(f"Total Time: {timer.elapsed_str()}")
+    print(f"Best Score: {best_score}")
+    print(f"Best Tile: {best_tile}")
+    print(f"{'='*80}\n")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -515,18 +920,69 @@ def play_model(model_path=None, episodes=1, use_ui=True):
         model_path = Path(model_path)
     
     if not model_path.exists():
-        print(f"❌ Model not found: {model_path}")
-        print(f"💡 Train a model first: python 2048RL.py train --algorithm dqn")
+        print(f"[ERROR] Model not found: {model_path}")
+        print(f"[INFO] Train a model first: python 2048RL.py train --algorithm dqn")
         return
     
     # Detect algorithm from path
-    if "double" in str(model_path).lower():
+    if "reinforce" in str(model_path).lower():
+        from src.agents.reinforce import REINFORCEAgent, REINFORCEConfig
+        
+        print("=" * 80)
+        print(f"PLAYING WITH REINFORCE MODEL")
+        print("=" * 80)
+        print(f"Model: {model_path}\n")
+        
+        cfg = CONFIG["reinforce"]
+        agent = REINFORCEAgent(
+            state_dim=16,
+            action_dim=4,
+            config=REINFORCEConfig(
+                learning_rate=cfg["learning_rate"],
+                gamma=cfg["gamma"],
+                hidden_dims=cfg["hidden_dims"]
+            )
+        )
+        agent.load(model_path)
+        algo_name = "REINFORCE"
+        
+    elif "double" in str(model_path).lower():
         from src.agents.double_dqn import DoubleDQNAgent, DoubleDQNModelConfig, DoubleDQNAgentConfig
         AgentClass = DoubleDQNAgent
         ModelConfigClass = DoubleDQNModelConfig
         AgentConfigClass = DoubleDQNAgentConfig
         config_key = "double_dqn"
         algo_name = "Double DQN"
+        
+        print("=" * 80)
+        print(f"PLAYING WITH {algo_name} MODEL")
+        print("=" * 80)
+        print(f"Model: {model_path}\n")
+        
+        # Load agent
+        cfg = CONFIG[config_key]
+        model_config = ModelConfigClass(
+            output_dim=len(ACTIONS),
+            hidden_dims=cfg["hidden_dims"]
+        )
+        agent_config = AgentConfigClass(
+            gamma=cfg["gamma"],
+            batch_size=cfg["batch_size"],
+            learning_rate=cfg["learning_rate"],
+            epsilon_start=0.0,  # No exploration when playing
+            epsilon_end=0.0,
+            epsilon_decay=1,
+            target_update_interval=cfg["target_update_interval"],
+            replay_buffer_size=cfg["replay_buffer_size"],
+            gradient_clip=cfg["gradient_clip"],
+        )
+        agent = AgentClass(
+            model_config=model_config,
+            agent_config=agent_config,
+            action_space=ACTIONS
+        )
+        agent.load(model_path)
+        
     else:
         from src.agents.dqn import DQNAgent, DQNModelConfig, AgentConfig
         AgentClass = DQNAgent
@@ -534,35 +990,35 @@ def play_model(model_path=None, episodes=1, use_ui=True):
         AgentConfigClass = AgentConfig
         config_key = "dqn"
         algo_name = "DQN"
-    
-    print("=" * 80)
-    print(f"🎮 PLAYING WITH {algo_name} MODEL")
-    print("=" * 80)
-    print(f"📂 Model: {model_path}\n")
-    
-    # Load agent
-    cfg = CONFIG[config_key]
-    model_config = ModelConfigClass(
-        output_dim=len(ACTIONS),
-        hidden_dims=cfg["hidden_dims"]
-    )
-    agent_config = AgentConfigClass(
-        gamma=cfg["gamma"],
-        batch_size=cfg["batch_size"],
-        learning_rate=cfg["learning_rate"],
-        epsilon_start=0.0,  # No exploration when playing
-        epsilon_end=0.0,
-        epsilon_decay=1,
-        target_update_interval=cfg["target_update_interval"],
-        replay_buffer_size=cfg["replay_buffer_size"],
-        gradient_clip=cfg["gradient_clip"],
-    )
-    agent = AgentClass(
-        model_config=model_config,
-        agent_config=agent_config,
-        action_space=ACTIONS
-    )
-    agent.load(model_path)
+        
+        print("=" * 80)
+        print(f"PLAYING WITH {algo_name} MODEL")
+        print("=" * 80)
+        print(f"Model: {model_path}\n")
+        
+        # Load agent
+        cfg = CONFIG[config_key]
+        model_config = ModelConfigClass(
+            output_dim=len(ACTIONS),
+            hidden_dims=cfg["hidden_dims"]
+        )
+        agent_config = AgentConfigClass(
+            gamma=cfg["gamma"],
+            batch_size=cfg["batch_size"],
+            learning_rate=cfg["learning_rate"],
+            epsilon_start=0.0,  # No exploration when playing
+            epsilon_end=0.0,
+            epsilon_decay=1,
+            target_update_interval=cfg["target_update_interval"],
+            replay_buffer_size=cfg["replay_buffer_size"],
+            gradient_clip=cfg["gradient_clip"],
+        )
+        agent = AgentClass(
+            model_config=model_config,
+            agent_config=agent_config,
+            action_space=ACTIONS
+        )
+        agent.load(model_path)
     
     # Setup environment
     env_config = EnvironmentConfig(
@@ -630,7 +1086,7 @@ Examples:
     train_parser = subparsers.add_parser('train', help='Train an agent')
     train_parser.add_argument(
         '--algorithm', '-a',
-        choices=['dqn', 'double-dqn', 'mcts', 'policy-gradient'],
+        choices=['dqn', 'double-dqn', 'mcts', 'reinforce'],
         default=CONFIG['algorithm'],
         help='Algorithm to train'
     )
@@ -649,6 +1105,18 @@ Examples:
         '--no-plots',
         action='store_true',
         help='Disable live training plots'
+    )
+    train_parser.add_argument(
+        '--tune-trials',
+        type=int,
+        default=30,
+        help='Number of Optuna trials for hyperparameter tuning before training (default: 30)'
+    )
+    train_parser.add_argument(
+        '--tune-episodes',
+        type=int,
+        default=200,
+        help='Episodes per tuning trial (default: 200, kept short for speed)'
     )
     
     # Play command
@@ -681,12 +1149,33 @@ Examples:
     
     # Execute command
     if args.command == 'train':
+        # MANDATORY: Always run hyperparameter tuning before training
+        print("\n[INFO] Running hyperparameter tuning before training...\n")
+        best_params = tune_hyperparameters(
+            args.algorithm, 
+            n_trials=args.tune_trials,
+            tune_episodes=args.tune_episodes
+        )
+        
+        if best_params:
+            # Update CONFIG with best hyperparameters
+            print(f"\n[INFO] Applying best hyperparameters for full training\n")
+            print("=" * 70)
+            for key, value in best_params.items():
+                if key in CONFIG[args.algorithm]:
+                    old_value = CONFIG[args.algorithm][key]
+                    CONFIG[args.algorithm][key] = value
+                    print(f"  {key}: {old_value} -> {value}")
+            print("=" * 70)
+            print()
+        
+        # Run full training with optimized hyperparameters
         if args.algorithm in ['dqn', 'double-dqn']:
             train_dqn_variant(args.algorithm)
         elif args.algorithm == 'mcts':
             train_mcts()
-        elif args.algorithm == 'policy-gradient':
-            train_policy_gradient()
+        elif args.algorithm == 'reinforce':
+            train_reinforce()
     
     elif args.command == 'play':
         play_model(
