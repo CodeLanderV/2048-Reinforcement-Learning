@@ -197,7 +197,7 @@ def tune_hyperparameters(algorithm: str, n_trials: int = 30, tune_episodes: int 
             # Sample DQN hyperparameters
             hidden_choice = trial.suggest_categorical("hidden_architecture", [0, 1, 2])
             hidden_options = [(128, 128), (256, 256), (512, 256)]
-            
+        
             config = {
                 "learning_rate": trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True),
                 "gamma": trial.suggest_float("gamma", 0.95, 0.999),
