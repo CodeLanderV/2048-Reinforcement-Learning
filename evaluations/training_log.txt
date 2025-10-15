@@ -42,43 +42,15 @@ Notes:              LR=0.0001, ε=0.0501
 
 
 ================================================================================
-Training Session: 2025-10-14 15:28:14
+Training Session: 2025-10-15 01:45:05
 ================================================================================
-Algorithm:          Double DQN
-Episodes:           5
-Training Time:      0:00:08
-Final Avg Reward:   830.80
-Best Max Tile:      128
-Best Score:         1340
-Model Saved:        models\DoubleDQN\double_dqn_final.pth
-Notes:              LR=0.0001, ε=0.9881
-================================================================================
-
-
-================================================================================
-Training Session: 2025-10-14 15:28:45
-================================================================================
-Algorithm:          Double DQN
-Episodes:           5
-Training Time:      0:00:06
-Final Avg Reward:   920.80
-Best Max Tile:      128
-Best Score:         1552
-Model Saved:        models\DoubleDQN\double_dqn_final.pth
-Notes:              LR=0.0001, ε=0.9864
-================================================================================
-
-
-================================================================================
-Training Session: 2025-10-14 22:50:39
-================================================================================
-Algorithm:          MCTS
-Episodes:           1
-Training Time:      0:08:05
-Final Avg Reward:   0.00
-Best Max Tile:      0
-Best Score:         0
-Model Saved:        N/A (MCTS doesn't save models)
-Notes:              Simulations=100, C=1.41
+Algorithm:          DQN
+Episodes:           2000
+Training Time:      0:35:35
+Final Avg Reward:   665.83
+Best Max Tile:      512
+Best Score:         5104
+Model Saved:        models/DQN/dqn_final.pth
+Notes:              LR=0.0001, ε=0.0501
 ================================================================================
 
