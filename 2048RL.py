@@ -930,6 +930,9 @@ def play_model(model_path=None, episodes=1, use_ui=True):
     
     # Detect algorithm from path
     if "reinforce" in str(model_path).lower():
+        """
+        ok this is to load the REINFORCE model into play.
+        """
         from src.agents.reinforce import REINFORCEAgent, REINFORCEConfig
         
         print("=" * 80)
