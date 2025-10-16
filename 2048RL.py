@@ -13,6 +13,8 @@ QUICK START:
 ALGORITHMS AVAILABLE:
     - DQN:         Deep Q-Network (value-based, off-policy)
     - Double-DQN:  Reduces Q-value overestimation
+
+ARCHIVED ALGORITHMS (commented out):
     - MCTS:        Monte Carlo Tree Search (planning, no learning)
     - REINFORCE:   Monte Carlo Policy Gradient (on-policy learning)
 """
@@ -414,6 +416,14 @@ def train_dqn_variant(algorithm="dqn"):
     episode_rewards = []
     episode_scores = []
     episode_max_tiles = []
+    moving_averages = []  # Track 100-episode moving average
+    
+    # Convergence detection parameters
+    convergence_window = 100  # Calculate moving average over 100 episodes
+    convergence_patience = 5000  # Stop if no improvement for 5000 episodes
+    best_moving_avg = 0
+    episodes_since_improvement = 0
+    converged = False
     
     # Setup live plotting (optional)
     if CONFIG["enable_plots"]:
@@ -423,7 +433,8 @@ def train_dqn_variant(algorithm="dqn"):
     save_dir = Path(CONFIG["save_dir"]) / save_subdir
     episodes = CONFIG["episodes"]
     
-    print(f"\nTraining for {episodes} episodes")
+    print(f"\nTraining for maximum {episodes} episodes")
+    print(f"Early stopping: Will stop if moving average doesn't improve for {convergence_patience} episodes")
     print(f"Models will be saved to: {save_dir}")
     print(f"Close plot window to stop early\n")
     
@@ -473,17 +484,41 @@ def train_dqn_variant(algorithm="dqn"):
             best_score = max(best_score, info['score'])
             best_tile = max(best_tile, info['max_tile'])
             
+            # Calculate 100-episode moving average
+            if len(episode_scores) >= convergence_window:
+                moving_avg = sum(episode_scores[-convergence_window:]) / convergence_window
+                moving_averages.append(moving_avg)
+                
+                # Check for convergence (improvement in moving average)
+                if moving_avg > best_moving_avg * 1.01:  # 1% improvement threshold
+                    best_moving_avg = moving_avg
+                    episodes_since_improvement = 0
+                else:
+                    episodes_since_improvement += 1
+                
+                # Check if converged
+                if episodes_since_improvement >= convergence_patience:
+                    converged = True
+                    print(f"\n[CONVERGENCE] Agent converged! No improvement for {convergence_patience} episodes")
+                    print(f"[CONVERGENCE] Best moving average: {best_moving_avg:.2f}")
+                    break
+            
             # Print progress every 10 episodes
             if episode % 10 == 0:
                 avg_reward = np.mean(episode_rewards[-50:])  # Last 50 episodes
                 avg_score = np.mean(episode_scores[-50:])
                 elapsed = timer.elapsed_str()
+                
+                # Add moving average info if available
+                ma_info = f" | MA-100: {moving_averages[-1]:6.0f}" if moving_averages else ""
+                convergence_info = f" | No-Imp: {episodes_since_improvement}" if len(episode_scores) >= convergence_window else ""
+                
                 print(
                     f"Ep {episode:4d} | "
                     f"Reward: {avg_reward:7.2f} | "
-                    f"Score: {avg_score:6.0f} | "
+                    f"Score: {avg_score:6.0f}{ma_info} | "
                     f"Tile: {episode_max_tiles[-1]:4d} | "
-                    f"ε: {agent.epsilon:.3f} | "
+                    f"ε: {agent.epsilon:.3f}{convergence_info} | "
                     f"Time: {elapsed}"
                 )
             
@@ -498,7 +533,7 @@ def train_dqn_variant(algorithm="dqn"):
             if CONFIG["enable_plots"] and episode % 5 == 0:
                 _update_training_plot(
                     ax1, ax2, episode_rewards, episode_scores, 
-                    episode_max_tiles, algo_name
+                    episode_max_tiles, moving_averages, algo_name
                 )
                 plt.pause(0.01)
                 
@@ -553,31 +588,37 @@ def train_dqn_variant(algorithm="dqn"):
         # Print summary
         print(f"\n{'='*80}")
         print(f"Training Complete!")
+        if converged:
+            print(f"Reason: Converged (no improvement for {convergence_patience} episodes)")
+            print(f"Best Moving Average (100ep): {best_moving_avg:.2f}")
+        print(f"Total Episodes: {episode}")
         print(f"Total Time: {timer.elapsed_str()}")
         print(f"Best Score: {best_score}")
         print(f"Best Tile: {best_tile}")
         print(f"{'='*80}\n")
 
 
-def _update_training_plot(ax1, ax2, rewards, scores, tiles, algo_name):
+def _update_training_plot(ax1, ax2, rewards, scores, tiles, moving_averages, algo_name):
     """Helper: Update matplotlib training plots."""
     import numpy as np
     
     ax1.clear()
     ax2.clear()
     
-    # Plot 1: Rewards with moving average
-    ax1.plot(rewards, alpha=0.3, color='blue', label='Raw')
-    if len(rewards) >= 50:
-        moving_avg = np.convolve(rewards, np.ones(50)/50, mode='valid')
-        ax1.plot(range(49, len(rewards)), moving_avg, color='blue', linewidth=2, label='MA-50')
+    # Plot 1: Scores with moving average (100-episode window)
+    ax1.scatter(range(len(scores)), scores, alpha=0.3, s=10, color='blue', label='Raw Score')
+    if moving_averages:
+        # Moving average starts at episode 100
+        ma_start = 100
+        ax1.plot(range(ma_start - 1, len(scores)), moving_averages, 
+                color='red', linewidth=2, label='MA-100 (Convergence Metric)')
     ax1.set_xlabel('Episode')
-    ax1.set_ylabel('Reward')
-    ax1.set_title(f'{algo_name} Training Progress - Rewards')
+    ax1.set_ylabel('Score')
+    ax1.set_title(f'{algo_name} Training Progress - Scores (Raw + 100-Episode Moving Average)')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
     
-    # Plot 2: Scores and Max Tiles
+    # Plot 2: Max Tiles
     ax2.plot(scores, alpha=0.3, color='green', label='Score')
     ax2.plot(tiles, alpha=0.3, color='red', label='Max Tile')
     ax2.set_xlabel('Episode')
@@ -588,318 +629,363 @@ def _update_training_plot(ax1, ax2, rewards, scores, tiles, algo_name):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# MCTS TRAINING (Planning-only, no learning)
+# ARCHIVED: MCTS & REINFORCE ALGORITHMS
+# ═══════════════════════════════════════════════════════════════════════════
+# 
+# These algorithms have been archived to keep the codebase focused on DQN/Double-DQN.
+# The code is preserved below for future reference but commented out.
+# To re-enable, uncomment the functions and update the main() algorithm routing.
+#
 # ═══════════════════════════════════════════════════════════════════════════
 
-def train_mcts():
-    """
-    Run MCTS simulations to evaluate performance.
-    
-    NOTE: MCTS is a planning algorithm - it doesn't "learn" from experience.
-    Each move it builds a search tree and picks the best action. No model is saved.
-    
-    This function just runs games to evaluate MCTS performance.
-    """
-    import numpy as np
-    from src.agents.mcts import MCTSAgent, MCTSConfig
-    from src.environment import GameEnvironment, EnvironmentConfig
-    from src.utils import TrainingTimer, EvaluationLogger
-    
-    print("=" * 80)
-    print("RUNNING MCTS SIMULATIONS")
-    print("=" * 80)
-    
-    # ─────────────────────────────────────────────────────────────────────
-    # Setup: Agent and Environment
-    # ─────────────────────────────────────────────────────────────────────
-    timer = TrainingTimer().start()
-    
-    cfg = CONFIG["mcts"]
-    agent = MCTSAgent(config=MCTSConfig(
-        simulations=cfg["simulations"],
-        exploration_constant=cfg["exploration_constant"]
-    ))
-    
-    env_config = EnvironmentConfig(
-        enable_ui=CONFIG["enable_ui"],
-        invalid_move_penalty=CONFIG["invalid_move_penalty"]
-    )
-    env = GameEnvironment(env_config)
-    
-    # Tracking
-    episode_scores = []
-    episode_max_tiles = []
-    episode_steps = []
-    
-    episodes = CONFIG["episodes"]
-    print(f"\nRunning {episodes} MCTS simulations")
-    print(f"🌲 {cfg['simulations']} tree searches per move\n")
-    
-    best_score = 0
-    best_tile = 0
-    
-    # ─────────────────────────────────────────────────────────────────────
-    # Simulation Loop
-    # ─────────────────────────────────────────────────────────────────────
-    try:
-        for episode in range(1, episodes + 1):
-            state = env.reset()
-            board = env.get_board()
-            done = False
-            steps = 0
-            
-            # Play one game using MCTS tree search
-            while not done:
-                action = agent.select_action(state, board)
-                result = env.step(action)
-                
-                state = result.state
-                board = env.get_board()
-                done = result.done
-                steps += 1
-            
-            # Track metrics
-            info = env.get_state()
-            episode_scores.append(info['score'])
-            episode_max_tiles.append(info['max_tile'])
-            episode_steps.append(steps)
-            
-            best_score = max(best_score, info['score'])
-            best_tile = max(best_tile, info['max_tile'])
-            
-            # Print progress every 5 games (MCTS is slower)
-            if episode % 5 == 0:
-                avg_score = np.mean(episode_scores[-10:])  # Last 10 games
-                avg_tile = np.mean(episode_max_tiles[-10:])
-                elapsed = timer.elapsed_str()
-                print(
-                    f"Game {episode:4d} | "
-                    f"Score: {info['score']:6.0f} | "
-                    f"Tile: {info['max_tile']:4d} | "
-                    f"Steps: {steps:4d} | "
-                    f"Avg Score: {avg_score:6.0f} | "
-                    f"Time: {elapsed}"
-                )
-    
-    except KeyboardInterrupt:
-        print("\n\n[WARNING] Simulation interrupted")
-    
-    # ─────────────────────────────────────────────────────────────────────
-    # Complete: Log Results (no model to save)
-    # ─────────────────────────────────────────────────────────────────────
-    finally:
-        timer.stop()
-        
-        # Log evaluation
-        logger = EvaluationLogger()
-        final_avg_score = float(np.mean(episode_scores[-100:])) if episode_scores else 0.0
-        
-        logger.log_training(
-            algorithm="MCTS",
-            episodes=episode,
-            final_avg_reward=final_avg_score,  # MCTS doesn't have explicit rewards
-            max_tile=best_tile,
-            final_score=best_score,
-            training_time=timer.elapsed_str(),
-            model_path="N/A (MCTS doesn't save models)",
-            notes=f"Simulations={cfg['simulations']}, C={cfg['exploration_constant']}"
-        )
-        
-        env.close()
-        
-        # Print summary
-        print(f"\n{'='*80}")
-        print(f"MCTS Simulation Complete!")
-        print(f"Total Time: {timer.elapsed_str()}")
-        print(f"Best Score: {best_score}")
-        print(f"Best Tile: {best_tile}")
-        print(f"Avg Score: {np.mean(episode_scores):.1f}")
-        print(f"Avg Tile: {np.mean(episode_max_tiles):.1f}")
-        print(f"{'='*80}\n")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# REINFORCE TRAINING (Monte Carlo Policy Gradient)
-# ═══════════════════════════════════════════════════════════════════════════
-
-def train_reinforce():
-    """
-    Train REINFORCE (Policy Gradient) agent.
-    
-    Key difference from DQN:
-    - Learns a stochastic policy π(a|s) that outputs action probabilities
-    - Updates after full episodes (Monte Carlo)
-    - On-policy: learns from its own experience only
-    """
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from src.environment import GameEnvironment, EnvironmentConfig, ACTIONS
-    from src.agents.reinforce import REINFORCEAgent, REINFORCEConfig
-    from src.utils import TrainingTimer, EvaluationLogger
-    
-    print("=" * 80)
-    print("TRAINING: REINFORCE (Monte Carlo Policy Gradient)")
-    print("=" * 80)
-    
-    # ─────────────────────────────────────────────────────────────────────
-    # Setup: Agent and Environment
-    # ─────────────────────────────────────────────────────────────────────
-    timer = TrainingTimer().start()
-    
-    cfg = CONFIG["reinforce"]
-    agent = REINFORCEAgent(
-        state_dim=16,
-        action_dim=4,
-        config=REINFORCEConfig(
-            learning_rate=cfg["learning_rate"],
-            gamma=cfg["gamma"],
-            hidden_dims=cfg["hidden_dims"],
-            use_baseline=cfg["use_baseline"],
-            entropy_coef=cfg["entropy_coef"]
-        )
-    )
-    
-    env_config = EnvironmentConfig(
-        enable_ui=CONFIG["enable_ui"],
-        invalid_move_penalty=CONFIG["invalid_move_penalty"]
-    )
-    env = GameEnvironment(env_config)
-    
-    # ─────────────────────────────────────────────────────────────────────
-    # Setup: Save directory and plotting
-    # ─────────────────────────────────────────────────────────────────────
-    save_dir = Path(CONFIG["save_dir"]) / "REINFORCE"
-    save_dir.mkdir(parents=True, exist_ok=True)
-    
-    if CONFIG["enable_plots"]:
-        plt.ion()
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-        fig.suptitle('REINFORCE Training Progress')
-    
-    # ─────────────────────────────────────────────────────────────────────
-    # Tracking variables
-    # ─────────────────────────────────────────────────────────────────────
-    episode_rewards = []
-    episode_scores = []
-    episode_max_tiles = []
-    best_score = 0
-    best_tile = 0
-    
-    episodes = CONFIG["episodes"]
-    checkpoint_interval = CONFIG["checkpoint_interval"]
-    
-    # ─────────────────────────────────────────────────────────────────────
-    # Training Loop
-    # ─────────────────────────────────────────────────────────────────────
-    print(f"\nTraining for {episodes} episodes...")
-    print(f"Checkpoints saved to: {save_dir}")
-    print(f"Updates: After each episode (Monte Carlo)")
-    print(f"Policy: Stochastic (samples from policy distribution)\n")
-    
-    for episode in range(1, episodes + 1):
-        state, _ = env.reset()
-        episode_reward = 0
-        done = False
-        
-        # ─────────────────────────────────────────────────────────────────
-        # Play full episode
-        # ─────────────────────────────────────────────────────────────────
-        while not done:
-            action = agent.select_action(state, env.board)
-            next_state, reward, done, _, info = env.step(ACTIONS[action])
-            
-            # Store transition
-            agent.store_transition(state, action, reward, next_state, done)
-            
-            state = next_state
-            episode_reward += reward
-        
-        # ─────────────────────────────────────────────────────────────────
-        # Update policy after episode completes (REINFORCE requirement)
-        # ─────────────────────────────────────────────────────────────────
-        agent.finish_episode()
-        
-        # ─────────────────────────────────────────────────────────────────
-        # Track metrics
-        # ─────────────────────────────────────────────────────────────────
-        episode_rewards.append(episode_reward)
-        episode_scores.append(env.board.score)
-        episode_max_tiles.append(env.board.max_tile())
-        
-        if env.board.score > best_score:
-            best_score = env.board.score
-        if env.board.max_tile() > best_tile:
-            best_tile = env.board.max_tile()
-        
-        # ─────────────────────────────────────────────────────────────────
-        # Logging and visualization
-        # ─────────────────────────────────────────────────────────────────
-        if episode % 10 == 0:
-            avg_reward_last_10 = np.mean(episode_rewards[-10:])
-            avg_score_last_10 = np.mean(episode_scores[-10:])
-            avg_tile_last_10 = np.mean(episode_max_tiles[-10:])
-            
-            print(f"Episode {episode:4d} | "
-                  f"Reward: {episode_reward:7.1f} | "
-                  f"Score: {env.board.score:6.0f} | "
-                  f"MaxTile: {env.board.max_tile():4d} | "
-                  f"Avg(10): R={avg_reward_last_10:6.1f} S={avg_score_last_10:6.0f} T={avg_tile_last_10:4.0f}")
-        
-        # Update plots
-        if CONFIG["enable_plots"] and episode % 20 == 0:
-            _update_training_plot(ax1, ax2, episode_rewards, episode_scores, 
-                                episode_max_tiles, "REINFORCE")
-            plt.pause(0.01)
-        
-        # ─────────────────────────────────────────────────────────────────
-        # Save checkpoints
-        # ─────────────────────────────────────────────────────────────────
-        if episode % checkpoint_interval == 0:
-            agent.save(save_dir, episode)
-    
-    # ─────────────────────────────────────────────────────────────────────
-    # Final save and evaluation
-    # ─────────────────────────────────────────────────────────────────────
-    timer.stop()
-    
-    final_path = save_dir / "reinforce_final.pth"
-    agent.save(save_dir, "final")
-    
-    # Save training plots
-    if CONFIG["enable_plots"] and plt.fignum_exists(fig.number):
-        plot_path = Path("evaluations") / "REINFORCE_training_plot.png"
-        plot_path.parent.mkdir(exist_ok=True)
-        fig.savefig(plot_path, dpi=150, bbox_inches='tight')
-        print(f"\n[SAVE] Training plot saved: {plot_path}")
-    
-    # Log training results
-    logger = EvaluationLogger()
-    final_avg_reward = float(np.mean(episode_rewards[-100:])) if episode_rewards else 0.0
-    
-    logger.log_training(
-        algorithm="REINFORCE",
-        episodes=episodes,
-        final_avg_reward=final_avg_reward,
-        max_tile=best_tile,
-        final_score=best_score,
-        training_time=timer.elapsed_str(),
-        model_path=str(final_path),
-        notes=f"LR={cfg['learning_rate']}, gamma={cfg['gamma']}, entropy={cfg['entropy_coef']}"
-    )
-    
-    # Cleanup
-    env.close()
-    if CONFIG["enable_plots"]:
-        plt.ioff()
-        plt.close('all')
-    
-    # Print summary
-    print(f"\n{'='*80}")
-    print(f"Training Complete!")
-    print(f"Total Time: {timer.elapsed_str()}")
-    print(f"Best Score: {best_score}")
-    print(f"Best Tile: {best_tile}")
-    print(f"{'='*80}\n")
+# # ═══════════════════════════════════════════════════════════════════════════
+# # MCTS TRAINING (Planning-only, no learning)
+# # ═══════════════════════════════════════════════════════════════════════════
+# 
+# def train_mcts():
+#     """
+#     Run MCTS simulations to evaluate performance.
+#     
+#     NOTE: MCTS is a planning algorithm - it doesn't "learn" from experience.
+#     Each move it builds a search tree and picks the best action. No model is saved.
+#     
+#     This function just runs games to evaluate MCTS performance.
+#     """
+#     import numpy as np
+#     from src.agents.mcts import MCTSAgent, MCTSConfig
+#     from src.environment import GameEnvironment, EnvironmentConfig
+#     from src.utils import TrainingTimer, EvaluationLogger
+#     
+#     print("=" * 80)
+#     print("RUNNING MCTS SIMULATIONS")
+#     print("=" * 80)
+#     
+#     # ─────────────────────────────────────────────────────────────────────
+#     # Setup: Agent and Environment
+#     # ─────────────────────────────────────────────────────────────────────
+#     timer = TrainingTimer().start()
+#     
+#     cfg = CONFIG["mcts"]
+#     agent = MCTSAgent(config=MCTSConfig(
+#         simulations=cfg["simulations"],
+#         exploration_constant=cfg["exploration_constant"]
+#     ))
+#     
+#     env_config = EnvironmentConfig(
+#         enable_ui=CONFIG["enable_ui"],
+#         invalid_move_penalty=CONFIG["invalid_move_penalty"]
+#     )
+#     env = GameEnvironment(env_config)
+#     
+#     # Tracking
+#     episode_scores = []
+#     episode_max_tiles = []
+#     episode_steps = []
+#     
+#     episodes = CONFIG["episodes"]
+#     print(f"\nRunning {episodes} MCTS simulations")
+#     print(f"🌲 {cfg['simulations']} tree searches per move\n")
+#     
+#     best_score = 0
+#     best_tile = 0
+#     
+#     # ─────────────────────────────────────────────────────────────────────
+#     # Simulation Loop
+#     # ─────────────────────────────────────────────────────────────────────
+#     try:
+#         for episode in range(1, episodes + 1):
+#             state = env.reset()
+#             board = env.get_board()
+#             done = False
+#             steps = 0
+#             
+#             # Play one game using MCTS tree search
+#             while not done:
+#                 action = agent.select_action(state, board)
+#                 result = env.step(action)
+#                 
+#                 state = result.state
+#                 board = env.get_board()
+#                 done = result.done
+#                 steps += 1
+#             
+#             # Track metrics
+#             info = env.get_state()
+#             episode_scores.append(info['score'])
+#             episode_max_tiles.append(info['max_tile'])
+#             episode_steps.append(steps)
+#             
+#             best_score = max(best_score, info['score'])
+#             best_tile = max(best_tile, info['max_tile'])
+#             
+#             # Print progress every 5 games (MCTS is slower)
+#             if episode % 5 == 0:
+#                 avg_score = np.mean(episode_scores[-10:])  # Last 10 games
+#                 avg_tile = np.mean(episode_max_tiles[-10:])
+#                 elapsed = timer.elapsed_str()
+#                 print(
+#                     f"Game {episode:4d} | "
+#                     f"Score: {info['score']:6.0f} | "
+#                     f"Tile: {info['max_tile']:4d} | "
+#                     f"Steps: {steps:4d} | "
+#                     f"Avg Score: {avg_score:6.0f} | "
+#                     f"Time: {elapsed}"
+#                 )
+#     
+#     except KeyboardInterrupt:
+#         print("\n\n[WARNING] Simulation interrupted")
+#     
+#     # ─────────────────────────────────────────────────────────────────────
+#     # Complete: Log Results (no model to save)
+#     # ─────────────────────────────────────────────────────────────────────
+#     finally:
+#         timer.stop()
+#         
+#         # Log evaluation
+#         logger = EvaluationLogger()
+#         final_avg_score = float(np.mean(episode_scores[-100:])) if episode_scores else 0.0
+#         
+#         logger.log_training(
+#             algorithm="MCTS",
+#             episodes=episode,
+#             final_avg_reward=final_avg_score,  # MCTS doesn't have explicit rewards
+#             max_tile=best_tile,
+#             final_score=best_score,
+#             training_time=timer.elapsed_str(),
+#             model_path="N/A (MCTS doesn't save models)",
+#             notes=f"Simulations={cfg['simulations']}, C={cfg['exploration_constant']}"
+#         )
+#         
+#         env.close()
+#         
+#         # Print summary
+#         print(f"\n{'='*80}")
+#         print(f"MCTS Simulation Complete!")
+#         print(f"Total Time: {timer.elapsed_str()}")
+#         print(f"Best Score: {best_score}")
+#         print(f"Best Tile: {best_tile}")
+#         print(f"Avg Score: {np.mean(episode_scores):.1f}")
+#         print(f"Avg Tile: {np.mean(episode_max_tiles):.1f}")
+#         print(f"{'='*80}\n")
+# 
+# 
+# # ═══════════════════════════════════════════════════════════════════════════
+# # REINFORCE TRAINING (Monte Carlo Policy Gradient)
+# # ═══════════════════════════════════════════════════════════════════════════
+# 
+# def train_reinforce():
+#     """
+#     Train REINFORCE (Policy Gradient) agent.
+#     
+#     Key difference from DQN:
+#     - Learns a stochastic policy π(a|s) that outputs action probabilities
+#     - Updates after full episodes (Monte Carlo)
+#     - On-policy: learns from its own experience only
+#     """
+#     import matplotlib.pyplot as plt
+#     import numpy as np
+#     from src.environment import GameEnvironment, EnvironmentConfig, ACTIONS
+#     from src.agents.reinforce import REINFORCEAgent, REINFORCEConfig
+#     from src.utils import TrainingTimer, EvaluationLogger
+#     
+#     print("=" * 80)
+#     print("TRAINING: REINFORCE (Monte Carlo Policy Gradient)")
+#     print("=" * 80)
+#     
+#     # ─────────────────────────────────────────────────────────────────────
+#     # Setup: Agent and Environment
+#     # ─────────────────────────────────────────────────────────────────────
+#     timer = TrainingTimer().start()
+#     
+#     cfg = CONFIG["reinforce"]
+#     agent = REINFORCEAgent(
+#         state_dim=16,
+#         action_dim=4,
+#         config=REINFORCEConfig(
+#             learning_rate=cfg["learning_rate"],
+#             gamma=cfg["gamma"],
+#             hidden_dims=cfg["hidden_dims"],
+#             use_baseline=cfg["use_baseline"],
+#             entropy_coef=cfg["entropy_coef"]
+#         )
+#     )
+#     
+#     env_config = EnvironmentConfig(
+#         enable_ui=CONFIG["enable_ui"],
+#         invalid_move_penalty=CONFIG["invalid_move_penalty"]
+#     )
+#     env = GameEnvironment(env_config)
+#     
+#     # ─────────────────────────────────────────────────────────────────────
+#     # Setup: Save directory and plotting
+#     # ─────────────────────────────────────────────────────────────────────
+#     save_dir = Path(CONFIG["save_dir"]) / "REINFORCE"
+#     save_dir.mkdir(parents=True, exist_ok=True)
+#     
+#     if CONFIG["enable_plots"]:
+#         plt.ion()
+#         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+#         fig.suptitle('REINFORCE Training Progress')
+#     
+#     # ─────────────────────────────────────────────────────────────────────
+#     # Tracking variables
+#     # ─────────────────────────────────────────────────────────────────────
+#     episode_rewards = []
+#     episode_scores = []
+#     episode_max_tiles = []
+#     moving_averages = []  # Track 100-episode moving average
+#     best_score = 0
+#     best_tile = 0
+#     
+#     # Convergence detection parameters
+#     convergence_window = 100
+#     convergence_patience = 5000
+#     best_moving_avg = 0
+#     episodes_since_improvement = 0
+#     converged = False
+#     
+#     episodes = CONFIG["episodes"]
+#     checkpoint_interval = CONFIG["checkpoint_interval"]
+#     
+#     # ─────────────────────────────────────────────────────────────────────
+#     # Training Loop
+#     # ─────────────────────────────────────────────────────────────────────
+#     print(f"\nTraining for maximum {episodes} episodes...")
+#     print(f"Early stopping: Will stop if moving average doesn't improve for {convergence_patience} episodes")
+#     print(f"Checkpoints saved to: {save_dir}")
+#     print(f"Updates: After each episode (Monte Carlo)")
+#     print(f"Policy: Stochastic (samples from policy distribution)\n")
+#     
+#     for episode in range(1, episodes + 1):
+#         state, _ = env.reset()
+#         episode_reward = 0
+#         done = False
+#         
+#         # ─────────────────────────────────────────────────────────────────
+#         # Play full episode
+#         # ─────────────────────────────────────────────────────────────────
+#         while not done:
+#             action = agent.select_action(state, env.board)
+#             next_state, reward, done, _, info = env.step(ACTIONS[action])
+#             
+#             # Store transition
+#             agent.store_transition(state, action, reward, next_state, done)
+#             
+#             state = next_state
+#             episode_reward += reward
+#         
+#         # ─────────────────────────────────────────────────────────────────
+#         # Update policy after episode completes (REINFORCE requirement)
+#         # ─────────────────────────────────────────────────────────────────
+#         agent.finish_episode()
+#         
+#         # ─────────────────────────────────────────────────────────────────
+#         # Track metrics
+#         # ─────────────────────────────────────────────────────────────────
+#         episode_rewards.append(episode_reward)
+#         episode_scores.append(env.board.score)
+#         episode_max_tiles.append(env.board.max_tile())
+#         
+#         if env.board.score > best_score:
+#             best_score = env.board.score
+#         if env.board.max_tile() > best_tile:
+#             best_tile = env.board.max_tile()
+#         
+#         # Calculate 100-episode moving average
+#         if len(episode_scores) >= convergence_window:
+#             moving_avg = sum(episode_scores[-convergence_window:]) / convergence_window
+#             moving_averages.append(moving_avg)
+#             
+#             # Check for convergence
+#             if moving_avg > best_moving_avg * 1.01:
+#                 best_moving_avg = moving_avg
+#                 episodes_since_improvement = 0
+#             else:
+#                 episodes_since_improvement += 1
+#             
+#             # Check if converged
+#             if episodes_since_improvement >= convergence_patience:
+#                 converged = True
+#                 print(f"\n[CONVERGENCE] Agent converged! No improvement for {convergence_patience} episodes")
+#                 print(f"[CONVERGENCE] Best moving average: {best_moving_avg:.2f}")
+#                 break
+#         
+#         # ─────────────────────────────────────────────────────────────────
+#         # Logging and visualization
+#         # ─────────────────────────────────────────────────────────────────
+#         if episode % 10 == 0:
+#             avg_reward_last_10 = np.mean(episode_rewards[-10:])
+#             avg_score_last_10 = np.mean(episode_scores[-10:])
+#             avg_tile_last_10 = np.mean(episode_max_tiles[-10:])
+#             
+#             ma_info = f" | MA-100: {moving_averages[-1]:6.0f}" if moving_averages else ""
+#             convergence_info = f" | No-Imp: {episodes_since_improvement}" if len(episode_scores) >= convergence_window else ""
+#             
+#             print(f"Episode {episode:4d} | "
+#                   f"Reward: {episode_reward:7.1f} | "
+#                   f"Score: {env.board.score:6.0f}{ma_info} | "
+#                   f"MaxTile: {env.board.max_tile():4d} | "
+#                   f"Avg(10): R={avg_reward_last_10:6.1f} S={avg_score_last_10:6.0f} T={avg_tile_last_10:4.0f}{convergence_info}")
+#         
+#         # Update plots
+#         if CONFIG["enable_plots"] and episode % 20 == 0:
+#             _update_training_plot(ax1, ax2, episode_rewards, episode_scores, 
+#                                 episode_max_tiles, moving_averages, "REINFORCE")
+#             plt.pause(0.01)
+#         
+#         # ─────────────────────────────────────────────────────────────────
+#         # Save checkpoints
+#         # ─────────────────────────────────────────────────────────────────
+#         if episode % checkpoint_interval == 0:
+#             agent.save(save_dir, episode)
+#     
+#     # ─────────────────────────────────────────────────────────────────────
+#     # Final save and evaluation
+#     # ─────────────────────────────────────────────────────────────────────
+#     timer.stop()
+#     
+#     final_path = save_dir / "reinforce_final.pth"
+#     agent.save(save_dir, "final")
+#     
+#     # Save training plots
+#     if CONFIG["enable_plots"] and plt.fignum_exists(fig.number):
+#         plot_path = Path("evaluations") / "REINFORCE_training_plot.png"
+#         plot_path.parent.mkdir(exist_ok=True)
+#         fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+#         print(f"\n[SAVE] Training plot saved: {plot_path}")
+#     
+#     # Log training results
+#     logger = EvaluationLogger()
+#     final_avg_reward = float(np.mean(episode_rewards[-100:])) if episode_rewards else 0.0
+#     
+#     logger.log_training(
+#         algorithm="REINFORCE",
+#         episodes=episodes,
+#         final_avg_reward=final_avg_reward,
+#         max_tile=best_tile,
+#         final_score=best_score,
+#         training_time=timer.elapsed_str(),
+#         model_path=str(final_path),
+#         notes=f"LR={cfg['learning_rate']}, gamma={cfg['gamma']}, entropy={cfg['entropy_coef']}"
+#     )
+#     
+#     # Cleanup
+#     env.close()
+#     if CONFIG["enable_plots"]:
+#         plt.ioff()
+#         plt.close('all')
+#     
+#     # Print summary
+#     print(f"\n{'='*80}")
+#     print(f"Training Complete!")
+#     if converged:
+#         print(f"Reason: Converged (no improvement for {convergence_patience} episodes)")
+#         print(f"Best Moving Average (100ep): {best_moving_avg:.2f}")
+#     print(f"Total Episodes: {episode}")
+#     print(f"Total Time: {timer.elapsed_str()}")
+#     print(f"Best Score: {best_score}")
+#     print(f"Best Tile: {best_tile}")
+#     print(f"{'='*80}\n")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1035,28 +1121,54 @@ def play_model(model_path=None, episodes=1, use_ui=True):
     env = GameEnvironment(env_config)
     
     # Play episodes
+    import time
+    
     for ep in range(1, episodes + 1):
         state = env.reset()
         done = False
         total_reward = 0
         steps = 0
         
+        print(f"\nGame {ep}/{episodes} starting...")
+        
         while not done:
+            # Select action
             action = agent.act_greedy(state)
+            
+            # Execute action
             result = env.step(action)
             
+            # Add small delay so UI updates are visible
+            if use_ui:
+                time.sleep(0.1)  # 100ms delay between moves (adjust as needed)
+            
+            # Update state
             state = result.state
             total_reward += result.reward
             done = result.done
             steps += 1
+            
+            # Handle pygame events to prevent freezing
+            if use_ui and env.ui:
+                import pygame
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        print("\n[INFO] Window closed by user")
+                        env.close()
+                        return
+                    elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                        print("\n[INFO] ESC pressed - stopping playback")
+                        env.close()
+                        return
         
         info = env.get_state()
-        print(f"\nGame {ep}/{episodes}:")
+        print(f"\nGame {ep}/{episodes} completed:")
         print(f"  Score: {info['score']}")
         print(f"  Max Tile: {info['max_tile']}")
         print(f"  Steps: {steps}")
         print(f"  Total Reward: {total_reward:.2f}")
     
+    print(f"\n[INFO] Finished playing {episodes} game(s)")
     env.close()
 
 
@@ -1093,9 +1205,9 @@ Examples:
     train_parser = subparsers.add_parser('train', help='Train an agent')
     train_parser.add_argument(
         '--algorithm', '-a',
-        choices=['dqn', 'double-dqn', 'mcts', 'reinforce'],
+        choices=['dqn', 'double-dqn'],  # MCTS and REINFORCE archived
         default=CONFIG['algorithm'],
-        help='Algorithm to train'
+        help='Algorithm to train (DQN or Double-DQN)'
     )
     train_parser.add_argument(
         '--episodes', '-e',
@@ -1180,9 +1292,13 @@ Examples:
         if args.algorithm in ['dqn', 'double-dqn']:
             train_dqn_variant(args.algorithm)
         elif args.algorithm == 'mcts':
-            train_mcts()
+            print("[ERROR] MCTS algorithm has been archived and is no longer available.")
+            print("[INFO] Please use 'dqn' or 'double-dqn' instead.")
+            print("[INFO] To re-enable MCTS, uncomment the train_mcts() function in 2048RL.py")
         elif args.algorithm == 'reinforce':
-            train_reinforce()
+            print("[ERROR] REINFORCE algorithm has been archived and is no longer available.")
+            print("[INFO] Please use 'dqn' or 'double-dqn' instead.")
+            print("[INFO] To re-enable REINFORCE, uncomment the train_reinforce() function in 2048RL.py")
     
     elif args.command == 'play':
         play_model(
