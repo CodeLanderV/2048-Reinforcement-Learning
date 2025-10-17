@@ -1,0 +1,15 @@
+{
+  "algorithm": "dqn",
+  "best_score": 1252.08,
+  "best_params": {
+    "hidden_architecture": 0,
+    "learning_rate": 0.0007568033172495135,
+    "gamma": 0.9544185285944239,
+    "batch_size": 256,
+    "epsilon_end": 0.0389233282817574,
+    "epsilon_decay": 135462,
+    "replay_buffer_size": 50000
+  },
+  "n_trials": 30,
+  "timestamp": "20251016_191301"
+}
