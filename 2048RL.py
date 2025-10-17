@@ -1121,27 +1121,89 @@ def play_model(model_path=None, episodes=1, use_ui=True):
     )
     env = GameEnvironment(env_config)
     
-    # Play episodes
-    import time
+    # Setup logging
+    import logging
+    logger = logging.getLogger()
     
+    # Log play session start
+    logger.info("=" * 80)
+    logger.info(f"PLAY SESSION STARTED - Model: {model_path}")
+    logger.info(f"Algorithm: {algo_name}")
+    logger.info(f"Episodes: {episodes}")
+    logger.info(f"UI Enabled: {use_ui}")
+    logger.info("=" * 80)
+    
+    # Play episodes
     for ep in range(1, episodes + 1):
         state = env.reset()
         done = False
         total_reward = 0
         steps = 0
         
-        print(f"\nGame {ep}/{episodes} starting...")
+        msg = f"GAME {ep}/{episodes} - Starting"
+        print(f"\n{'='*80}")
+        print(msg)
+        print(f"{'='*80}")
+        logger.info(msg)
         
         while not done:
-            # Select action
-            action = agent.act_greedy(state)
+            # Get current board state info
+            info = env.get_state()
+            
+            # Get valid actions (test each action to see if board changes)
+            valid_actions = []
+            for action_idx in range(len(ACTIONS)):
+                test_board = env.board.clone()
+                test_result = test_board.step(ACTIONS[action_idx])
+                if test_result.moved:
+                    valid_actions.append(action_idx)
+            
+            # If no valid actions, game is over
+            if not valid_actions:
+                game_over_msg = f"Step {steps + 1}: No valid moves available - Game Over!"
+                print(f"\n{game_over_msg}")
+                logger.info(game_over_msg)
+                done = True
+                break
+            
+            # Select best action from valid actions only
+            import torch
+            with torch.no_grad():
+                state_tensor = torch.tensor(state, dtype=torch.float32, device=agent.device).unsqueeze(0)
+                q_values = agent.policy_net(state_tensor).squeeze(0)
+                
+                # Mask invalid actions by setting their Q-values to -infinity
+                masked_q_values = torch.full_like(q_values, float('-inf'))
+                for valid_idx in valid_actions:
+                    masked_q_values[valid_idx] = q_values[valid_idx]
+                
+                action = int(torch.argmax(masked_q_values).item())
+            
+            action_name = ACTIONS[action]
             
             # Execute action
             result = env.step(action)
             
-            # Add small delay so UI updates are visible
-            if use_ui:
-                time.sleep(0.1)  # 100ms delay between moves (adjust as needed)
+            # Print and log step information
+            step_msg = f"Step {steps + 1}: Action={action_name.upper()}, Reward={result.reward:+.1f}, Score={info['score']}->{result.info['score']}, MaxTile={result.info['max_tile']}, Empty={result.info['empty_cells']}, Valid={len(valid_actions)}"
+            logger.info(step_msg)
+            
+            print(f"\nStep {steps + 1}:")
+            print(f"  Action: {action_name.upper()} (Valid: {len(valid_actions)} options)")
+            print(f"  Reward: {result.reward:+.1f}")
+            print(f"  Score: {info['score']} -> {result.info['score']}")
+            print(f"  Max Tile: {result.info['max_tile']}")
+            print(f"  Empty Cells: {result.info['empty_cells']}")
+            print(f"  Moved: {result.info.get('moved', 'N/A')}")
+            print(f"  Done: {result.done}")
+            
+            # Print board state (original tile values)
+            board_grid = env.board.grid
+            print(f"  Board:")
+            for row in board_grid:
+                row_str = ' '.join(f'{int(val):5d}' for val in row)
+                print(f"    {row_str}")
+                logger.info(f"    {row_str}")
             
             # Update state
             state = result.state
@@ -1149,27 +1211,56 @@ def play_model(model_path=None, episodes=1, use_ui=True):
             done = result.done
             steps += 1
             
+            # Safety check: prevent infinite loops
+            if steps > 10000:
+                safety_msg = f"[WARNING] Stopping after {steps} steps (safety limit)"
+                print(f"\n{safety_msg}")
+                logger.warning(safety_msg)
+                break
+            
             # Handle pygame events to prevent freezing
             if use_ui and env.ui:
                 import pygame
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
-                        print("\n[INFO] Window closed by user")
+                        quit_msg = "[INFO] Window closed by user"
+                        print(f"\n{quit_msg}")
+                        logger.info(quit_msg)
                         env.close()
                         return
                     elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                        print("\n[INFO] ESC pressed - stopping playback")
+                        esc_msg = "[INFO] ESC pressed - stopping playback"
+                        print(f"\n{esc_msg}")
+                        logger.info(esc_msg)
                         env.close()
                         return
         
-        info = env.get_state()
-        print(f"\nGame {ep}/{episodes} completed:")
-        print(f"  Score: {info['score']}")
-        print(f"  Max Tile: {info['max_tile']}")
-        print(f"  Steps: {steps}")
-        print(f"  Total Reward: {total_reward:.2f}")
+        # Final game summary
+        final_info = env.get_state()
+        avg_reward = total_reward/steps if steps > 0 else 0
+        
+        summary_lines = [
+            f"GAME {ep}/{episodes} - COMPLETED",
+            f"Final Score: {final_info['score']}",
+            f"Max Tile: {final_info['max_tile']}",
+            f"Total Steps: {steps}",
+            f"Total Reward: {total_reward:.2f}",
+            f"Average Reward/Step: {avg_reward:.2f}"
+        ]
+        
+        print(f"\n{'='*80}")
+        for line in summary_lines:
+            print(line)
+            logger.info(line)
+        print(f"{'='*80}")
+        logger.info("=" * 80)
     
-    print(f"\n[INFO] Finished playing {episodes} game(s)")
+    # Log session end
+    final_msg = f"PLAY SESSION COMPLETED - {episodes} game(s) played"
+    print(f"\n[INFO] {final_msg}")
+    logger.info(final_msg)
+    logger.info("=" * 80)
+    
     env.close()
 
 
