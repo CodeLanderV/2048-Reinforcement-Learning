@@ -140,7 +140,7 @@ class GameEnvironment:
         Returns:
             StepResult with:
                 - state: New board state after action
-                - reward: Score gained (+ penalty if invalid move)
+                - reward: Score gained (+ penalty if invalid move + bonuses)
                 - done: True if no more valid moves
                 - info: Dict with game statistics
         """
@@ -183,12 +183,38 @@ class GameEnvironment:
         result = self.board.step(direction)
         moved = result.moved  # Did board change?
         
-        # Reward = score gained from merges
-        reward = float(result.score_gain)
+        # Base reward = score gained from merges (logarithmic scaling)
+        # This emphasizes larger merges more
+        base_reward = float(result.score_gain)
+        if base_reward > 0:
+            # Use log scaling to reward larger merges more
+            base_reward = np.log2(base_reward + 1) * 10  # Scale up for significance
+        
+        reward = base_reward
         
         # Penalty for invalid moves (hits wall, no tiles merge)
         if not moved:
             reward += self.config.invalid_move_penalty
+        else:
+            # Bonus for valid moves to encourage action
+            reward += 1.0
+            
+            # Bonus for maintaining empty cells (helps avoid getting stuck)
+            empty_cells = len(self.board.get_empty_cells())
+            reward += empty_cells * 0.5  # Small bonus per empty cell
+            
+            # Progressive tile milestone rewards (encourages reaching higher tiles)
+            max_tile = self.board.max_tile()
+            if max_tile >= 2048:
+                reward += 1000  # Huge bonus for reaching 2048
+            elif max_tile >= 1024:
+                reward += 500
+            elif max_tile >= 512:
+                reward += 250
+            elif max_tile >= 256:
+                reward += 100
+            elif max_tile >= 128:
+                reward += 50
         
         # Update tracking and build new state
         self._last_score = self.board.score
@@ -265,20 +291,23 @@ class GameEnvironment:
         Transformation:
             - Raw board: [[2, 4], [8, 0], ...] (tile values)
             - Log2:      [[1, 2], [3, 0], ...] (log2 of values)
-            - Flatten:   [1, 2, 3, 0, ...] (16D vector)
+            - Normalize: [[0.09, 0.18], [0.27, 0], ...] (divide by 11.0 for 2048 tile)
+            - Flatten:   [0.09, 0.18, 0.27, 0, ...] (16D vector)
         
         This normalization helps neural networks learn better by keeping
-        values in a smaller range (0-11 instead of 0-2048).
+        values in a normalized [0, 1] range where 1.0 represents a 2048 tile.
         
         Args:
             board: 4x4 numpy array of tile values
         
         Returns:
-            Flattened log2-normalized state (16D float32 vector)
+            Flattened log2-normalized state (16D float32 vector, range [0, 1])
         """
         with np.errstate(divide="ignore"):  # Ignore log2(0) warnings
             log_board = np.where(board > 0, np.log2(board), 0.0)
-        return log_board.flatten().astype(np.float32)
+        # Normalize by 11.0 (log2(2048)) to keep values in [0, 1] range
+        normalized = (log_board / 11.0).astype(np.float32)
+        return normalized.flatten()
 
     @staticmethod
     def _action_to_direction(action: int | str) -> str:

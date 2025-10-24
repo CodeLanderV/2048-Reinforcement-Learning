@@ -94,8 +94,9 @@ class GameBoard:
         """Return log2 normalized board suitable for neural networks."""
         with np.errstate(divide="ignore"):
             log_board = np.where(self.grid > 0, np.log2(self.grid), 0.0)
-        max_value = log_board.max() or 1.0
-        return (log_board / max_value).astype(np.float32)
+        # Don't divide by max - preserve actual tile values for better learning
+        # Values range from 0 (empty) to 11 (2048) or higher
+        return (log_board / 11.0).astype(np.float32)  # Normalize to [0, 1] range
 
     # Private helper methods
     def _spawn_tile(self, board: Optional[np.ndarray] = None) -> None:
