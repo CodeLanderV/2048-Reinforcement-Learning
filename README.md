@@ -1,4 +1,7 @@
 # 🎮 2048 Reinforcement Learning# 2048 Reinforcement Learning
+# THIS BRANCH IS NOT TO BE VIBE CODED AND HAS TO BE IMPLEMENTED YOURSELF.
+
+# 2048 Reinforcement Learning Agent
 
 
 
