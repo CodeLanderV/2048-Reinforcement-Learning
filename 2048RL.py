@@ -480,8 +480,14 @@ def train_dqn_variant(algorithm="dqn"):
             episode_rewards.append(episode_reward)
             episode_scores.append(info['score'])
             episode_max_tiles.append(info['max_tile'])
-            
-            best_score = max(best_score, info['score'])
+
+            # Report when we hit a new absolute best score (helps debug plateaus)
+            if info['score'] > best_score:
+                best_score = info['score']
+                print(f"[NEW BEST] Ep {episode:4d} | New best score: {best_score} | Tile: {info['max_tile']}")
+            else:
+                best_score = max(best_score, info['score'])
+
             best_tile = max(best_tile, info['max_tile'])
             
             # Calculate 100-episode moving average
@@ -510,8 +516,14 @@ def train_dqn_variant(algorithm="dqn"):
                 avg_score = np.mean(episode_scores[-50:])
                 elapsed = timer.elapsed_str()
                 
-                # Add moving average info if available
-                ma_info = f" | MA-100: {moving_averages[-1]:6.0f}" if moving_averages else ""
+                # Add moving average info if available. Also show best MA and delta for clarity.
+                if moving_averages:
+                    cur_ma = moving_averages[-1]
+                    ma_delta = cur_ma - best_moving_avg
+                    ma_info = f" | MA-100: {cur_ma:6.0f} (best {best_moving_avg:6.0f}, Δ={ma_delta:+6.1f})"
+                else:
+                    ma_info = ""
+
                 convergence_info = f" | No-Imp: {episodes_since_improvement}" if len(episode_scores) >= convergence_window else ""
                 
                 print(
