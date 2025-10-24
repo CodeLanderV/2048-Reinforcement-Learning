@@ -93,7 +93,7 @@ CONFIG = {
     # These settings are research-proven and optimized for 2048
     "dqn": {
         # Neural network training
-        "learning_rate": 3e-4,          # How fast model learns (increased for faster convergence)
+        "learning_rate": 1e-4,          # Reduced from 3e-4 to prevent overfitting
         "gamma": 0.99,                  # Discount factor for future rewards
         "batch_size": 512,              # Samples per training step (increased for stability)
         "gradient_clip": 5.0,           # Prevents gradient explosion
@@ -101,8 +101,8 @@ CONFIG = {
         
         # Exploration schedule (ε-greedy)
         "epsilon_start": 1.0,           # Start: 100% random actions (explore)
-        "epsilon_end": 0.01,            # End: 1% random actions (mostly exploit)
-        "epsilon_decay": 200000,        # Steps to decay from start→end (longer exploration)
+        "epsilon_end": 0.05,            # Increased from 0.01 to maintain more exploration
+        "epsilon_decay": 250000,        # Increased from 200000 for slower decay
         
         # Experience replay & stability
         "replay_buffer_size": 500000,  # How many past experiences to remember (increased)

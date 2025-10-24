@@ -183,12 +183,9 @@ class GameEnvironment:
         result = self.board.step(direction)
         moved = result.moved  # Did board change?
         
-        # Base reward = score gained from merges (logarithmic scaling)
-        # This emphasizes larger merges more
+        # Base reward = raw score gain from merges
+        # Keep it simple - direct score is already logarithmic (2+2=4, 4+4=8, etc)
         base_reward = float(result.score_gain)
-        if base_reward > 0:
-            # Use log scaling to reward larger merges more
-            base_reward = np.log2(base_reward + 1) * 10  # Scale up for significance
         
         reward = base_reward
         
@@ -196,25 +193,20 @@ class GameEnvironment:
         if not moved:
             reward += self.config.invalid_move_penalty
         else:
-            # Bonus for valid moves to encourage action
-            reward += 1.0
-            
-            # Bonus for maintaining empty cells (helps avoid getting stuck)
+            # Small bonus for maintaining empty cells (encourages avoiding clutter)
             empty_cells = len(self.board.get_empty_cells())
-            reward += empty_cells * 0.5  # Small bonus per empty cell
+            if empty_cells >= 4:  # Only reward if board isn't too full
+                reward += empty_cells * 0.2  # Reduced from 0.5
             
-            # Progressive tile milestone rewards (encourages reaching higher tiles)
+            # Bonus for keeping highest tile in a corner (key 2048 strategy)
             max_tile = self.board.max_tile()
-            if max_tile >= 2048:
-                reward += 1000  # Huge bonus for reaching 2048
-            elif max_tile >= 1024:
-                reward += 500
-            elif max_tile >= 512:
-                reward += 250
-            elif max_tile >= 256:
-                reward += 100
-            elif max_tile >= 128:
-                reward += 50
+            if max_tile >= 64:  # Only apply for tiles 64+
+                grid = self.board.grid
+                corners = [grid[0, 0], grid[0, 3], grid[3, 0], grid[3, 3]]
+                if max_tile in corners:
+                    # Reward scales with tile value (higher tiles = more important)
+                    corner_bonus = np.log2(max_tile) * 2.0  # e.g., 256 tile = log2(256)*2 = 16 points
+                    reward += corner_bonus
         
         # Update tracking and build new state
         self._last_score = self.board.score

@@ -222,3 +222,17 @@ Model Saved:        models/DQN/dqn_final.pth
 Notes:              LR=0.0005, epsilon_end=0.01, epsilon_decay=200000
 ================================================================================
 
+
+================================================================================
+Training Session: 2025-10-24 20:48:54
+================================================================================
+Algorithm:          DQN
+Episodes:           956
+Training Time:      0:40:14
+Final Avg Reward:   5147.32
+Best Max Tile:      256
+Best Score:         3364
+Model Saved:        models/DQN/dqn_final.pth
+Notes:              LR=0.0005, epsilon_end=0.01, epsilon_decay=200000
+================================================================================
+
