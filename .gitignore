@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Model checkpoints (keep only final models)
+models/**/dqn_ep*.pth
+models/**/double_dqn_ep*.pth
+models/**/reinforce_ep*.pth
+
+# Large logs
+evaluations/logs.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Training artifacts
+*.png
+!evaluations/*.png
