@@ -25,6 +25,7 @@ import logging
 import json
 from pathlib import Path
 from datetime import datetime
+import re
 
 # Setup Python path and suppress numpy warnings
 sys.path.insert(0, str(Path(__file__).parent))
@@ -316,7 +317,7 @@ def tune_hyperparameters(algorithm: str, n_trials: int = 30, tune_episodes: int 
 # UNIFIED DQN TRAINING (DQN & Double DQN share 95% of code)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def train_dqn_variant(algorithm="dqn"):
+def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str = None):
     """
     Train DQN or Double DQN agent with configured settings.
     
@@ -415,6 +416,116 @@ def train_dqn_variant(algorithm="dqn"):
     
     save_dir = Path(CONFIG["save_dir"]) / save_subdir
     episodes = CONFIG["episodes"]
+
+    # Determine resume behavior (none/latest/second-last or explicit path)
+    start_episode = 1
+    if resume_path:
+        resume_candidate = Path(resume_path)
+        if resume_candidate.exists():
+            try:
+                # First, peek at checkpoint to get its architecture
+                import torch as _torch
+                ckpt_peek = _torch.load(resume_candidate, map_location='cpu', weights_only=False)
+                ckpt_model_cfg = ckpt_peek.get('model_config', {})
+                ckpt_hidden = ckpt_model_cfg.get('hidden_dims')
+                
+                # If architectures don't match, rebuild agent with checkpoint's architecture
+                if ckpt_hidden and ckpt_hidden != cfg["hidden_dims"]:
+                    print(f"[RESUME] Checkpoint has different architecture: {ckpt_hidden} vs current {cfg['hidden_dims']}")
+                    print(f"[RESUME] Rebuilding agent to match checkpoint architecture...")
+                    
+                    # Rebuild with checkpoint's architecture
+                    model_config = ModelConfigClass(
+                        output_dim=len(ACTIONS),
+                        hidden_dims=ckpt_hidden
+                    )
+                    agent_config = AgentConfigClass(
+                        gamma=cfg["gamma"],
+                        batch_size=cfg["batch_size"],
+                        learning_rate=cfg["learning_rate"],
+                        epsilon_start=cfg["epsilon_start"],
+                        epsilon_end=cfg["epsilon_end"],
+                        epsilon_decay=cfg["epsilon_decay"],
+                        target_update_interval=cfg["target_update_interval"],
+                        replay_buffer_size=cfg["replay_buffer_size"],
+                        gradient_clip=cfg["gradient_clip"],
+                    )
+                    agent = AgentClass(
+                        model_config=model_config,
+                        agent_config=agent_config,
+                        action_space=ACTIONS
+                    )
+                
+                # Load checkpoint into agent
+                agent.load(resume_candidate)
+                # Attempt to extract episode number from filename
+                m = re.search(r"_ep(\d+)\.pth", resume_candidate.name)
+                start_episode = int(m.group(1)) + 1 if m else 1
+                print(f"[RESUME] Resuming from provided checkpoint: {resume_candidate} (next ep {start_episode})")
+                print(f"[RESUME] Loaded state - Steps: {agent.steps_done}, Epsilon: {agent.epsilon:.4f}")
+            except Exception as e:
+                print(f"[ERROR] Failed to load resume checkpoint {resume_candidate}: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print(f"[WARNING] Resume path not found: {resume_candidate} - starting from scratch")
+    elif resume_mode in ("latest", "second-last"):
+        # Find numbered checkpoint files
+        chk_files = list(save_dir.glob(f"{save_prefix}_ep*.pth"))
+        def _ep_num(p):
+            m = re.search(r"_ep(\d+)\.pth", p.name)
+            return int(m.group(1)) if m else -1
+
+        chk_files = sorted([p for p in chk_files if _ep_num(p) >= 0], key=_ep_num)
+        if chk_files:
+            idx = -1 if resume_mode == "latest" else -2
+            if len(chk_files) >= abs(idx):
+                candidate = chk_files[idx]
+                try:
+                    # Peek at checkpoint architecture
+                    import torch as _torch
+                    ckpt_peek = _torch.load(candidate, map_location='cpu', weights_only=False)
+                    ckpt_model_cfg = ckpt_peek.get('model_config', {})
+                    ckpt_hidden = ckpt_model_cfg.get('hidden_dims')
+                    
+                    # If architectures don't match, rebuild agent
+                    if ckpt_hidden and ckpt_hidden != cfg["hidden_dims"]:
+                        print(f"[RESUME] Checkpoint has different architecture: {ckpt_hidden} vs current {cfg['hidden_dims']}")
+                        print(f"[RESUME] Rebuilding agent to match checkpoint architecture...")
+                        
+                        model_config = ModelConfigClass(
+                            output_dim=len(ACTIONS),
+                            hidden_dims=ckpt_hidden
+                        )
+                        agent_config = AgentConfigClass(
+                            gamma=cfg["gamma"],
+                            batch_size=cfg["batch_size"],
+                            learning_rate=cfg["learning_rate"],
+                            epsilon_start=cfg["epsilon_start"],
+                            epsilon_end=cfg["epsilon_end"],
+                            epsilon_decay=cfg["epsilon_decay"],
+                            target_update_interval=cfg["target_update_interval"],
+                            replay_buffer_size=cfg["replay_buffer_size"],
+                            gradient_clip=cfg["gradient_clip"],
+                        )
+                        agent = AgentClass(
+                            model_config=model_config,
+                            agent_config=agent_config,
+                            action_space=ACTIONS
+                        )
+                    
+                    agent.load(candidate)
+                    start_episode = _ep_num(candidate) + 1
+                    print(f"[RESUME] Resuming from {resume_mode} checkpoint: {candidate} (next ep {start_episode})")
+                    print(f"[RESUME] Loaded state - Steps: {agent.steps_done}, Epsilon: {agent.epsilon:.4f}")
+                except Exception as e:
+                    print(f"[ERROR] Failed to load checkpoint {candidate}: {e} - starting from scratch")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print(f"[WARNING] Not enough checkpoints to resume '{resume_mode}' - starting from scratch")
+        else:
+            print(f"[WARNING] No checkpoints found in {save_dir} - starting from scratch")
     
     print(f"\nTraining for maximum {episodes} episodes")
     print(f"Early stopping: Will stop if moving average doesn't improve for {convergence_patience} episodes")
@@ -428,7 +539,7 @@ def train_dqn_variant(algorithm="dqn"):
     # Main Training Loop
     # ─────────────────────────────────────────────────────────────────────
     try:
-        for episode in range(1, episodes + 1):
+        for episode in range(start_episode, episodes + 1):
             # Reset for new episode
             state = env.reset()
             done = False
@@ -1324,6 +1435,18 @@ Examples:
         default=200,
         help='Episodes per tuning trial (default: 200, kept short for speed)'
     )
+    train_parser.add_argument(
+        '--resume',
+        choices=['none', 'latest', 'second-last'],
+        default='none',
+        help='Resume training from checkpoint: latest or second-last (default: none)'
+    )
+    train_parser.add_argument(
+        '--resume-path',
+        type=str,
+        default=None,
+        help='Explicit path to checkpoint (.pth) to resume from (overrides --resume)'
+    )
     
     # Play command
     play_parser = subparsers.add_parser('play', help='Watch trained model play')
@@ -1380,7 +1503,12 @@ Examples:
         
         # Run full training with optimized hyperparameters
         if args.algorithm in ['dqn', 'double-dqn']:
-            train_dqn_variant(args.algorithm)
+            # Pass resume options through to training function
+            resume_mode = getattr(args, 'resume', None)
+            resume_path = getattr(args, 'resume_path', None)
+            if resume_mode == 'none' and not resume_path:
+                resume_mode = None
+            train_dqn_variant(args.algorithm, resume_mode=resume_mode, resume_path=resume_path)
         elif args.algorithm == 'mcts':
             print("[ERROR] MCTS algorithm has been archived and is no longer available.")
             print("[INFO] Please use 'dqn' or 'double-dqn' instead.")
