@@ -81,10 +81,10 @@ CONFIG = {
     # General Training Settings
     # ─────────────────────────────────────────────────────────────────────
     "algorithm": "dqn",         # Which algorithm: "dqn", "double-dqn", "mcts", "reinforce"
-    "episodes": 3000,           # How many games to train on (default: 3000)
-    "enable_ui": True,          # Show pygame window? (slower but fun to watch)
+    "episodes": 10000,          # How many games to train on (increased for better results)
+    "enable_ui": False,         # Show pygame window? (slower but fun to watch)
     "enable_plots": True,       # Show live training graphs?
-    "hyperparameter_tuning": False,  # Enable hyperparameter search
+    "hyperparameter_tuning": False,  # Enable hyperparameter search (set to False for faster training)
     
     # ─────────────────────────────────────────────────────────────────────
     # DQN Hyperparameters (Standard Deep Q-Network)
@@ -92,19 +92,19 @@ CONFIG = {
     # These settings are research-proven and optimized for 2048
     "dqn": {
         # Neural network training
-        "learning_rate": 1e-4,          # How fast model learns (Adam optimizer)
+        "learning_rate": 5e-4,          # How fast model learns (increased for faster convergence)
         "gamma": 0.99,                  # Discount factor for future rewards
-        "batch_size": 128,              # Samples per training step
+        "batch_size": 256,              # Samples per training step (increased for stability)
         "gradient_clip": 5.0,           # Prevents gradient explosion
-        "hidden_dims": (256, 256),      # Neural network architecture
+        "hidden_dims": (512, 512, 256), # Neural network architecture (deeper and wider)
         
         # Exploration schedule (ε-greedy)
         "epsilon_start": 1.0,           # Start: 100% random actions (explore)
-        "epsilon_end": 0.1,             # End: 10% random actions (exploit learned policy)
-        "epsilon_decay": 100000,        # Steps to decay from start→end
+        "epsilon_end": 0.01,            # End: 1% random actions (mostly exploit)
+        "epsilon_decay": 200000,        # Steps to decay from start→end (longer exploration)
         
         # Experience replay & stability
-        "replay_buffer_size": 100_000,  # How many past experiences to remember
+        "replay_buffer_size": 200_000,  # How many past experiences to remember (increased)
         "target_update_interval": 1000, # Update target network every N steps
     },
     
@@ -113,18 +113,18 @@ CONFIG = {
     # ─────────────────────────────────────────────────────────────────────
     # More exploration since Double DQN is inherently more stable
     "double_dqn": {
-        "learning_rate": 1e-4,
+        "learning_rate": 5e-4,
         "gamma": 0.99,
-        "batch_size": 128,
+        "batch_size": 256,
         "gradient_clip": 5.0,
-        "hidden_dims": (256, 256),
+        "hidden_dims": (512, 512, 256), # Same improved architecture
         
         # INCREASED exploration vs standard DQN
         "epsilon_start": 1.0,
-        "epsilon_end": 0.15,            # Keep 15% randomness (vs DQN's 10%)
-        "epsilon_decay": 120000,        # Slower decay (vs DQN's 100k)
+        "epsilon_end": 0.01,            # Keep 1% randomness
+        "epsilon_decay": 200000,        # Longer decay
         
-        "replay_buffer_size": 100_000,
+        "replay_buffer_size": 200_000,
         "target_update_interval": 1000,
     },
     
@@ -142,7 +142,7 @@ CONFIG = {
     "reinforce": {
         "learning_rate": 0.001,         # Policy network learning rate
         "gamma": 0.99,                  # Discount factor for returns
-        "hidden_dims": [256, 256],      # Policy network architecture
+        "hidden_dims": [512, 512, 256], # Policy network architecture (improved)
         "use_baseline": True,           # Subtract baseline to reduce variance
         "entropy_coef": 0.01,           # Entropy regularization (encourages exploration)
     },
@@ -152,7 +152,7 @@ CONFIG = {
     # ─────────────────────────────────────────────────────────────────────
     "invalid_move_penalty": -10.0,      # Punishment for invalid moves (prevents getting stuck)
     "save_dir": "models",               # Model checkpoint directory
-    "checkpoint_interval": 100,         # Save model every N episodes
+    "checkpoint_interval": 500,         # Save model every N episodes (less frequent)
     "eval_episodes": 5,                 # Games to play during evaluation
 }
 
@@ -1320,8 +1320,8 @@ Examples:
     train_parser.add_argument(
         '--tune-trials',
         type=int,
-        default=30,
-        help='Number of Optuna trials for hyperparameter tuning before training (default: 30)'
+        default=0,  # Default to 0 = no tuning
+        help='Number of Optuna trials for hyperparameter tuning before training (default: 0 = skip tuning)'
     )
     train_parser.add_argument(
         '--tune-episodes',
@@ -1360,25 +1360,28 @@ Examples:
     
     # Execute command
     if args.command == 'train':
-        # MANDATORY: Always run hyperparameter tuning before training
-        print("\n[INFO] Running hyperparameter tuning before training...\n")
-        best_params = tune_hyperparameters(
-            args.algorithm, 
-            n_trials=args.tune_trials,
-            tune_episodes=args.tune_episodes
-        )
-        
-        if best_params:
-            # Update CONFIG with best hyperparameters
-            print(f"\n[INFO] Applying best hyperparameters for full training\n")
-            print("=" * 70)
-            for key, value in best_params.items():
-                if key in CONFIG[args.algorithm]:
-                    old_value = CONFIG[args.algorithm][key]
-                    CONFIG[args.algorithm][key] = value
-                    print(f"  {key}: {old_value} -> {value}")
-            print("=" * 70)
-            print()
+        # Optional hyperparameter tuning (only if --tune flag is provided)
+        if hasattr(args, 'tune_trials') and args.tune_trials > 0:
+            print("\n[INFO] Running hyperparameter tuning before training...\n")
+            best_params = tune_hyperparameters(
+                args.algorithm, 
+                n_trials=args.tune_trials,
+                tune_episodes=args.tune_episodes
+            )
+            
+            if best_params:
+                # Update CONFIG with best hyperparameters
+                print(f"\n[INFO] Applying best hyperparameters for full training\n")
+                print("=" * 70)
+                for key, value in best_params.items():
+                    if key in CONFIG[args.algorithm]:
+                        old_value = CONFIG[args.algorithm][key]
+                        CONFIG[args.algorithm][key] = value
+                        print(f"  {key}: {old_value} -> {value}")
+                print("=" * 70)
+                print()
+        else:
+            print("\n[INFO] Skipping hyperparameter tuning, using default/configured parameters\n")
         
         # Run full training with optimized hyperparameters
         if args.algorithm in ['dqn', 'double-dqn']:

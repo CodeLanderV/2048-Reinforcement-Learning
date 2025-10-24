@@ -17,7 +17,7 @@ class DoubleDQN(DQN):
 class DoubleDQNModelConfig:
     """Configuration for Double DQN model."""
     input_dim: int = 16
-    hidden_dims: Tuple[int, ...] = (256, 256)
+    hidden_dims: Tuple[int, ...] = (512, 512, 256)  # Deeper and wider network
     output_dim: int = 4
 
     def build(self) -> DoubleDQN:

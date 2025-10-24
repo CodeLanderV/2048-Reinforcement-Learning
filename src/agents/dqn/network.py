@@ -10,27 +10,30 @@ from torch import nn
 
 
 class DQN(nn.Module):
-    """Fully-connected Q-network for 2048."""
+    """Fully-connected Q-network for 2048 with improved architecture."""
 
     def __init__(
         self,
         input_dim: int = 16,
-        hidden_dims: Tuple[int, ...] = (256, 256),
+        hidden_dims: Tuple[int, ...] = (512, 512, 256),
         output_dim: int = 4
     ) -> None:
         super().__init__()
         
         layers = []
         last_dim = input_dim
-        for hidden_dim in hidden_dims:
+        for i, hidden_dim in enumerate(hidden_dims):
             layers.append(nn.Linear(last_dim, hidden_dim))
             layers.append(nn.ReLU())
+            # Add dropout for regularization (except last hidden layer)
+            if i < len(hidden_dims) - 1:
+                layers.append(nn.Dropout(0.1))
             last_dim = hidden_dim
         layers.append(nn.Linear(last_dim, output_dim))
         
         self.network = nn.Sequential(*layers)
 
-        # Initialize weights
+        # Initialize weights with He initialization for better gradient flow
         for module in self.network:
             if isinstance(module, nn.Linear):
                 nn.init.kaiming_uniform_(module.weight, nonlinearity="relu")
@@ -44,7 +47,7 @@ class DQN(nn.Module):
 class DQNModelConfig:
     """Configuration for DQN model."""
     input_dim: int = 16
-    hidden_dims: Tuple[int, ...] = (256, 256)
+    hidden_dims: Tuple[int, ...] = (512, 512, 256)  # Deeper and wider network
     output_dim: int = 4
 
     def build(self) -> DQN:
