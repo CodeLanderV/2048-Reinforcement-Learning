@@ -92,9 +92,9 @@ CONFIG = {
     # These settings are research-proven and optimized for 2048
     "dqn": {
         # Neural network training
-        "learning_rate": 5e-4,          # How fast model learns (increased for faster convergence)
+        "learning_rate": 3e-4,          # How fast model learns (increased for faster convergence)
         "gamma": 0.99,                  # Discount factor for future rewards
-        "batch_size": 256,              # Samples per training step (increased for stability)
+        "batch_size": 512,              # Samples per training step (increased for stability)
         "gradient_clip": 5.0,           # Prevents gradient explosion
         "hidden_dims": (512, 512, 256), # Neural network architecture (deeper and wider)
         
@@ -104,7 +104,7 @@ CONFIG = {
         "epsilon_decay": 200000,        # Steps to decay from start→end (longer exploration)
         
         # Experience replay & stability
-        "replay_buffer_size": 200_000,  # How many past experiences to remember (increased)
+        "replay_buffer_size": 500000,  # How many past experiences to remember (increased)
         "target_update_interval": 1000, # Update target network every N steps
     },
     
@@ -113,7 +113,7 @@ CONFIG = {
     # ─────────────────────────────────────────────────────────────────────
     # More exploration since Double DQN is inherently more stable
     "double_dqn": {
-        "learning_rate": 5e-4,
+        "learning_rate": 3e-4,
         "gamma": 0.99,
         "batch_size": 256,
         "gradient_clip": 5.0,
@@ -128,24 +128,7 @@ CONFIG = {
         "target_update_interval": 1000,
     },
     
-    # ─────────────────────────────────────────────────────────────────────
-    # MCTS Hyperparameters (Monte Carlo Tree Search - Pure Planning)
-    # ─────────────────────────────────────────────────────────────────────
-    "mcts": {
-        "simulations": 100,             # Tree search simulations per move
-        "exploration_constant": 1.41,   # UCB exploration (√2 is theoretically optimal)
-    },
-    
-    # ─────────────────────────────────────────────────────────────────────
-    # REINFORCE Hyperparameters (Monte Carlo Policy Gradient)
-    # ─────────────────────────────────────────────────────────────────────
-    "reinforce": {
-        "learning_rate": 0.001,         # Policy network learning rate
-        "gamma": 0.99,                  # Discount factor for returns
-        "hidden_dims": [512, 512, 256], # Policy network architecture (improved)
-        "use_baseline": True,           # Subtract baseline to reduce variance
-        "entropy_coef": 0.01,           # Entropy regularization (encourages exploration)
-    },
+   
     
     # ─────────────────────────────────────────────────────────────────────
     # Environment & Saving
