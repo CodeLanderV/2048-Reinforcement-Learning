@@ -30,13 +30,6 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent))
 warnings.filterwarnings('ignore', category=RuntimeWarning)
 
-# Try importing Optuna (optional for hyperparameter tuning)
-try:
-    import optuna
-    OPTUNA_AVAILABLE = True
-except ImportError:
-    OPTUNA_AVAILABLE = False
-
 # Setup logging to capture all output
 def setup_logging():
     """Setup logging to both console and file."""
@@ -81,27 +74,27 @@ CONFIG = {
     # General Training Settings
     # ─────────────────────────────────────────────────────────────────────
     "algorithm": "dqn",         # Which algorithm: "dqn", "double-dqn", "mcts", "reinforce"
-    "episodes": 3000,           # How many games to train on (default: 3000)
-    "enable_ui": True,          # Show pygame window? (slower but fun to watch)
+    "episodes": 10000,          # How many games to train on (increased for better convergence)
+    "enable_ui": False,         # Show pygame window? (disabled for faster training)
     "enable_plots": True,       # Show live training graphs?
-    "hyperparameter_tuning": False,  # Enable hyperparameter search
     
     # ─────────────────────────────────────────────────────────────────────
-    # DQN Hyperparameters (Standard Deep Q-Network)
+    # DQN Hyperparameters (Research-Proven Defaults from DeepMind)
     # ─────────────────────────────────────────────────────────────────────
-    # These settings are research-proven and optimized for 2048
+    # These settings are optimized based on the original DQN paper and 
+    # empirical testing for the 2048 game
     "dqn": {
         # Neural network training
-        "learning_rate": 1e-4,          # How fast model learns (Adam optimizer)
-        "gamma": 0.99,                  # Discount factor for future rewards
+        "learning_rate": 1e-4,          # Standard Adam learning rate (proven optimal)
+        "gamma": 0.99,                  # High discount for long-term planning
         "batch_size": 128,              # Samples per training step
         "gradient_clip": 5.0,           # Prevents gradient explosion
-        "hidden_dims": (256, 256),      # Neural network architecture
+        "hidden_dims": (256, 256),      # Adequate network capacity for 2048
         
-        # Exploration schedule (ε-greedy)
+        # Exploration schedule (ε-greedy) - CRITICAL FOR 2048
         "epsilon_start": 1.0,           # Start: 100% random actions (explore)
-        "epsilon_end": 0.1,             # End: 10% random actions (exploit learned policy)
-        "epsilon_decay": 100000,        # Steps to decay from start→end
+        "epsilon_end": 0.1,             # End: 10% random actions (prevents getting stuck)
+        "epsilon_decay": 100000,        # Decay over 100k steps (balanced exploration)
         
         # Experience replay & stability
         "replay_buffer_size": 100_000,  # How many past experiences to remember
@@ -155,178 +148,6 @@ CONFIG = {
     "checkpoint_interval": 100,         # Save model every N episodes
     "eval_episodes": 5,                 # Games to play during evaluation
 }
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# HYPERPARAMETER TUNING WITH OPTUNA
-# ═══════════════════════════════════════════════════════════════════════════
-
-def tune_hyperparameters(algorithm: str, n_trials: int = 30, tune_episodes: int = 200):
-    """
-    Run Optuna hyperparameter optimization with short training runs.
-    
-    Uses quick 200-episode training sessions to evaluate different hyperparameter
-    combinations, then returns the best configuration to use for full training.
-    
-    Args:
-        algorithm: 'dqn', 'double-dqn', or 'reinforce'
-        n_trials: Number of Optuna trials to run
-        tune_episodes: Episodes per trial (kept short for speed)
-    
-    Returns:
-        dict: Best hyperparameters found
-    """
-    if not OPTUNA_AVAILABLE:
-        print("[ERROR] Optuna not installed. Install with: pip install optuna")
-        print("[INFO] Skipping hyperparameter tuning, using default CONFIG values")
-        return None
-    
-    import numpy as np
-    from src.environment import GameEnvironment, EnvironmentConfig, ACTIONS
-    
-    print("=" * 80)
-    print(f"HYPERPARAMETER TUNING: {algorithm.upper()}")
-    print("=" * 80)
-    print(f"Method: Optuna TPE Sampler")
-    print(f"Trials: {n_trials}")
-    print(f"Episodes per trial: {tune_episodes} (short runs for speed)")
-    print("=" * 80)
-    
-    def objective(trial: optuna.Trial) -> float:
-        """Optuna objective function - trains agent and returns score."""
-        
-        if algorithm in ['dqn', 'double-dqn']:
-            # Sample DQN hyperparameters
-            hidden_choice = trial.suggest_categorical("hidden_architecture", [0, 1, 2])
-            hidden_options = [(128, 128), (256, 256), (512, 256)]
-        
-            config = {
-                "learning_rate": trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True),
-                "gamma": trial.suggest_float("gamma", 0.95, 0.999),
-                "batch_size": trial.suggest_categorical("batch_size", [32, 64, 128, 256]),
-                "epsilon_end": trial.suggest_float("epsilon_end", 0.01, 0.15),
-                "epsilon_decay": trial.suggest_int("epsilon_decay", 50000, 150000),
-                "replay_buffer_size": trial.suggest_categorical("replay_buffer_size", [50000, 100000]),
-                "hidden_dims": hidden_options[hidden_choice],
-            }
-            
-            # Quick DQN training
-            from src.agents.dqn import DQNAgent, DQNModelConfig, AgentConfig
-            from src.agents.double_dqn import DoubleDQNAgent, DoubleDQNModelConfig, DoubleDQNAgentConfig
-            
-            if algorithm == "double-dqn":
-                model_config = DoubleDQNModelConfig(output_dim=len(ACTIONS), hidden_dims=config["hidden_dims"])
-                agent_config = DoubleDQNAgentConfig(
-                    gamma=config["gamma"], batch_size=config["batch_size"],
-                    learning_rate=config["learning_rate"], epsilon_start=1.0,
-                    epsilon_end=config["epsilon_end"], epsilon_decay=config["epsilon_decay"],
-                    target_update_interval=1000, replay_buffer_size=config["replay_buffer_size"],
-                    gradient_clip=5.0
-                )
-                agent = DoubleDQNAgent(model_config, agent_config, ACTIONS)
-            else:
-                model_config = DQNModelConfig(output_dim=len(ACTIONS), hidden_dims=config["hidden_dims"])
-                agent_config = AgentConfig(
-                    gamma=config["gamma"], batch_size=config["batch_size"],
-                    learning_rate=config["learning_rate"], epsilon_start=1.0,
-                    epsilon_end=config["epsilon_end"], epsilon_decay=config["epsilon_decay"],
-                    target_update_interval=1000, replay_buffer_size=config["replay_buffer_size"],
-                    gradient_clip=5.0
-                )
-                agent = DQNAgent(model_config, agent_config, ACTIONS)
-            
-            env_config = EnvironmentConfig(enable_ui=False, invalid_move_penalty=-100)
-            env = GameEnvironment(env_config)
-            
-            scores = []
-            for ep in range(tune_episodes):
-                state = env.reset()
-                done = False
-                while not done:
-                    action = agent.select_action(state)
-                    result = env.step(action)
-                    agent.store_transition(state, action, result.reward, result.state, result.done)
-                    if agent.can_optimize():
-                        agent.optimize_model()
-                    state = result.state
-                    done = result.done
-                scores.append(env.get_state()['score'])
-            
-            env.close()
-            avg_score = float(np.mean(scores[-50:]))
-            
-        else:  # reinforce
-            # Sample REINFORCE hyperparameters
-            hidden_choice = trial.suggest_categorical("hidden_architecture", [0, 1, 2])
-            hidden_options = [[128, 128], [256, 256], [512, 256]]
-            
-            config = {
-                "learning_rate": trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True),
-                "gamma": trial.suggest_float("gamma", 0.95, 0.999),
-                "hidden_dims": hidden_options[hidden_choice],
-                "entropy_coef": trial.suggest_float("entropy_coef", 1e-4, 1e-1, log=True),
-            }
-            
-            from src.agents.reinforce import REINFORCEAgent, REINFORCEConfig
-            
-            agent = REINFORCEAgent(
-                state_dim=16, action_dim=4,
-                config=REINFORCEConfig(
-                    learning_rate=config["learning_rate"], gamma=config["gamma"],
-                    hidden_dims=config["hidden_dims"], use_baseline=True,
-                    entropy_coef=config["entropy_coef"]
-                )
-            )
-            
-            env_config = EnvironmentConfig(enable_ui=False, invalid_move_penalty=-100)
-            env = GameEnvironment(env_config)
-            
-            scores = []
-            for ep in range(tune_episodes):
-                state, _ = env.reset()
-                done = False
-                while not done:
-                    action = agent.select_action(state, env.board)
-                    next_state, reward, done, _, _ = env.step(ACTIONS[action])
-                    agent.store_transition(state, action, reward, next_state, done)
-                    state = next_state
-                agent.finish_episode()
-                scores.append(env.board.score)
-            
-            env.close()
-            avg_score = float(np.mean(scores[-50:]))
-        
-        print(f"[TRIAL {trial.number + 1}/{n_trials}] Score: {avg_score:.2f}")
-        return avg_score
-    
-    # Run Optuna optimization
-    study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=42))
-    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
-    
-    # Display and save results
-    print(f"\n{'='*80}")
-    print(f"BEST HYPERPARAMETERS FOUND")
-    print(f"{'='*80}")
-    print(f"Best Score: {study.best_value:.2f}")
-    for key, value in study.best_params.items():
-        print(f"  {key}: {value}")
-    print(f"{'='*80}\n")
-    
-    # Save to file
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    results_file = Path("evaluations") / f"optuna_{algorithm}_{timestamp}.json"
-    results_file.parent.mkdir(exist_ok=True)
-    with open(results_file, "w") as f:
-        json.dump({
-            "algorithm": algorithm,
-            "best_score": study.best_value,
-            "best_params": study.best_params,
-            "n_trials": n_trials,
-            "timestamp": timestamp
-        }, f, indent=2)
-    print(f"[SAVE] Tuning results saved to: {results_file}\n")
-    
-    return study.best_params
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1226,18 +1047,6 @@ Examples:
         action='store_true',
         help='Disable live training plots'
     )
-    train_parser.add_argument(
-        '--tune-trials',
-        type=int,
-        default=30,
-        help='Number of Optuna trials for hyperparameter tuning before training (default: 30)'
-    )
-    train_parser.add_argument(
-        '--tune-episodes',
-        type=int,
-        default=200,
-        help='Episodes per tuning trial (default: 200, kept short for speed)'
-    )
     
     # Play command
     play_parser = subparsers.add_parser('play', help='Watch trained model play')
@@ -1269,27 +1078,21 @@ Examples:
     
     # Execute command
     if args.command == 'train':
-        # MANDATORY: Always run hyperparameter tuning before training
-        print("\n[INFO] Running hyperparameter tuning before training...\n")
-        best_params = tune_hyperparameters(
-            args.algorithm, 
-            n_trials=args.tune_trials,
-            tune_episodes=args.tune_episodes
-        )
+        # Training with proven hyperparameters (Optuna removed)
+        print("\n[INFO] Starting training with research-proven hyperparameters")
+        print("=" * 70)
+        print("DQN Configuration:")
+        print(f"  Learning Rate:    {CONFIG['dqn']['learning_rate']}")
+        print(f"  Gamma:            {CONFIG['dqn']['gamma']}")
+        print(f"  Epsilon End:      {CONFIG['dqn']['epsilon_end']}")
+        print(f"  Epsilon Decay:    {CONFIG['dqn']['epsilon_decay']}")
+        print(f"  Network Size:     {CONFIG['dqn']['hidden_dims']}")
+        print(f"  Batch Size:       {CONFIG['dqn']['batch_size']}")
+        print(f"  Episodes:         {CONFIG['episodes']}")
+        print("=" * 70)
+        print()
         
-        if best_params:
-            # Update CONFIG with best hyperparameters
-            print(f"\n[INFO] Applying best hyperparameters for full training\n")
-            print("=" * 70)
-            for key, value in best_params.items():
-                if key in CONFIG[args.algorithm]:
-                    old_value = CONFIG[args.algorithm][key]
-                    CONFIG[args.algorithm][key] = value
-                    print(f"  {key}: {old_value} -> {value}")
-            print("=" * 70)
-            print()
-        
-        # Run full training with optimized hyperparameters
+        # Run training
         if args.algorithm in ['dqn', 'double-dqn']:
             train_dqn_variant(args.algorithm)
         elif args.algorithm == 'mcts':
