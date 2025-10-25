@@ -263,7 +263,7 @@ class TrainingPlotter:
     
     def _plot_convergence(self):
         """Plot episodes since last improvement (convergence tracking)."""
-        if len(self.moving_avgs) == 0:
+        if len(self.moving_avgs) <= 1:
             return
         
         # Calculate episodes since improvement over time
@@ -279,7 +279,9 @@ class TrainingPlotter:
                 episodes_no_improve += 1
             convergence_history.append(episodes_no_improve)
         
-        ma_episodes = np.array(self.episodes[self.ma_window-1:])
+        # Get episodes that correspond to moving averages
+        ma_start_index = len(self.episodes) - len(self.moving_avgs)
+        ma_episodes = np.array(self.episodes[ma_start_index:])
         
         # Plot convergence metric
         self.ax_convergence.fill_between(
