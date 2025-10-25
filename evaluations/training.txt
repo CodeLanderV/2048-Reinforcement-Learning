@@ -1,0 +1,285 @@
+================================================================================
+TRAINING DQN AGENT
+================================================================================
+
+Training for maximum 5000 episodes
+Early stopping: Will stop if moving average doesn't improve for 1000 episodes
+Models will be saved to: models/DQN
+Close plot window to stop early
+
+[NEW BEST] Ep 2001 | New best score: 1004 | Tile: 128
+[NEW BEST] Ep 2002 | New best score: 1392 | Tile: 128
+[NEW BEST] Ep 2003 | New best score: 2172 | Tile: 256
+
+[SAVE] Final model saved: models/DQN/dqn_final.pth
+[SAVE] Training plot saved: evaluations/DQN_training_plot.png
+
+================================================================================
+Training Complete!
+Total Episodes: 2005
+Total Time: 0:00:12
+Best Score: 2172
+Best Tile: 256
+================================================================================
+
+================================================================================
+TRAINING DQN AGENT
+================================================================================
+
+Training for maximum 50 episodes
+Early stopping: Will stop if moving average doesn't improve for 1000 episodes
+Models will be saved to: models/DQN
+Close plot window to stop early
+
+================================================================================
+TRAINING DQN AGENT
+================================================================================
+
+Training for maximum 50 episodes
+Early stopping: Will stop if moving average doesn't improve for 1000 episodes
+Models will be saved to: models/DQN
+Close plot window to stop early
+
+================================================================================
+TRAINING DQN AGENT
+================================================================================
+
+Training for maximum 50 episodes
+Early stopping: Will stop if moving average doesn't improve for 1000 episodes
+Models will be saved to: models/DQN
+Close plot window to stop early
+
+
+[SAVE] Final model saved: models/DQN/dqn_final.pth
+[SAVE] Training plot saved: evaluations/DQN_training_plot.png
+
+================================================================================
+Training Complete!
+Total Episodes: 2001
+Total Time: 0:00:00
+Best Score: 0
+Best Tile: 0
+================================================================================
+
+================================================================================
+TRAINING DQN AGENT
+================================================================================
+
+Training for maximum 2100 episodes
+Early stopping: Will stop if moving average doesn't improve for 1000 episodes
+Models will be saved to: models/DQN
+Close plot window to stop early
+
+[NEW BEST] Ep 2001 | New best score: 1696 | Tile: 128
+[NEW BEST] Ep 2007 | New best score: 2108 | Tile: 256
+Ep 2010 | Reward: 1101.46 | Score:   1071 | Tile:   32 | ε: 0.410 | Time: 0:00:26
+Ep 2020 | Reward: 1058.21 | Score:   1065 | Tile:  128 | ε: 0.408 | Time: 0:01:08
+
+
+[WARNING] Training interrupted by user
+
+[SAVE] Final model saved: models/DQN/dqn_final.pth
+[SAVE] Training plot saved: evaluations/DQN_training_plot.png
+
+================================================================================
+Training Complete!
+Total Episodes: 2029
+Total Time: 0:01:53
+Best Score: 2108
+Best Tile: 256
+================================================================================
+
+================================================================================
+TRAINING DQN AGENT
+================================================================================
+
+Training for maximum 5000 episodes
+Early stopping: Will stop if moving average doesn't improve for 1000 episodes
+Models will be saved to: models/DQN
+Close plot window to stop early
+
+[NEW BEST] Ep 2001 | New best score: 856 | Tile: 64
+[NEW BEST] Ep 2002 | New best score: 2388 | Tile: 256
+[NEW BEST] Ep 2005 | New best score: 2852 | Tile: 256
+Ep 2010 | Reward: 1714.02 | Score:   1462 | Tile:  128 | ε: 0.410 | Time: 0:00:33
+Ep 2020 | Reward: 1311.41 | Score:   1186 | Tile:   64 | ε: 0.408 | Time: 0:01:09
+[NEW BEST] Ep 2028 | New best score: 2996 | Tile: 256
+Ep 2030 | Reward: 1413.10 | Score:   1306 | Tile:  128 | ε: 0.407 | Time: 0:02:01
+Ep 2040 | Reward: 1424.52 | Score:   1310 | Tile:  256 | ε: 0.405 | Time: 0:02:51
+Ep 2050 | Reward: 1434.11 | Score:   1324 | Tile:  128 | ε: 0.403 | Time: 0:03:39
+Ep 2060 | Reward: 1311.27 | Score:   1241 | Tile:  128 | ε: 0.402 | Time: 0:04:19
+Ep 2070 | Reward: 1342.65 | Score:   1271 | Tile:  128 | ε: 0.401 | Time: 0:04:59
+Ep 2080 | Reward: 1302.28 | Score:   1219 | Tile:   64 | ε: 0.399 | Time: 0:05:46
+Ep 2090 | Reward: 1311.27 | Score:   1235 | Tile:   64 | ε: 0.398 | Time: 0:06:36
+Ep 2100 | Reward: 1261.59 | Score:   1181 | MA-100:   1253 (best   1253, Δ=  +0.0) | Tile:  128 | ε: 0.396 | No-Imp: 0 | Time: 0:07:18
+
+[SAVE] Final model saved: models/DQN/dqn_final.pth
+[SAVE] Training plot saved: evaluations/DQN_training_plot.png
+
+================================================================================
+Training Complete!
+Total Episodes: 2100
+Total Time: 0:07:18
+Best Score: 2996
+Best Tile: 256
+================================================================================
+
+================================================================================
+TRAINING DQN AGENT
+================================================================================
+
+Training for maximum 10000 episodes
+Early stopping: Will stop if moving average doesn't improve for 1000 episodes
+Models will be saved to: models/DQN
+Close plot window to stop early
+
+[NEW BEST] Ep 2001 | New best score: 620 | Tile: 64
+[NEW BEST] Ep 2003 | New best score: 1464 | Tile: 128
+Ep 2010 | Reward:  803.28 | Score:    756 | Tile:   64 | ε: 0.410 | Time: 0:00:18
+================================================================================
+TRAINING DQN AGENT
+================================================================================
+
+Training for maximum 10000 episodes
+Early stopping: Will stop if moving average doesn't improve for 1000 episodes
+Models will be saved to: models/DQN
+Close plot window to stop early
+
+[NEW BEST] Ep 2001 | New best score: 980 | Tile: 64
+[NEW BEST] Ep 2004 | New best score: 3096 | Tile: 256
+[NEW BEST] Ep 2013 | New best score: 1492 | Tile: 128
+[NEW BEST] Ep 2015 | New best score: 1704 | Tile: 128
+Ep 2020 | Reward:  939.62 | Score:    900 | Tile:   64 | ε: 0.409 | Time: 0:01:26
+Ep 2010 | Reward: 1677.08 | Score:   1464 | Tile:  256 | ε: 0.409 | Time: 0:01:06
+Ep 2020 | Reward: 1232.81 | Score:   1143 | Tile:   64 | ε: 0.408 | Time: 0:02:07
+Ep 2030 | Reward: 1005.87 | Score:    995 | Tile:  128 | ε: 0.407 | Time: 0:02:46
+[NEW BEST] Ep 2034 | New best score: 1712 | Tile: 128
+Ep 2030 | Reward: 1247.55 | Score:   1147 | Tile:  128 | ε: 0.407 | Time: 0:03:19
+Ep 2040 | Reward: 1066.50 | Score:   1030 | Tile:   64 | ε: 0.406 | Time: 0:04:02
+[NEW BEST] Ep 2044 | New best score: 2448 | Tile: 256
+Ep 2040 | Reward: 1282.32 | Score:   1188 | Tile:   32 | ε: 0.405 | Time: 0:04:57
+Ep 2050 | Reward: 1111.16 | Score:   1057 | Tile:  128 | ε: 0.404 | Time: 0:05:31
+[NEW BEST] Ep 2051 | New best score: 2660 | Tile: 256
+Ep 2050 | Reward: 1269.61 | Score:   1185 | Tile:  128 | ε: 0.404 | Time: 0:06:14
+Ep 2060 | Reward: 1271.19 | Score:   1164 | Tile:  128 | ε: 0.403 | Time: 0:06:51
+Ep 2060 | Reward: 1184.87 | Score:   1110 | Tile:  128 | ε: 0.402 | Time: 0:07:27
+Ep 2070 | Reward: 1296.52 | Score:   1182 | Tile:  256 | ε: 0.401 | Time: 0:08:04
+[NEW BEST] Ep 2073 | New best score: 2820 | Tile: 256
+Ep 2070 | Reward: 1303.86 | Score:   1197 | Tile:  128 | ε: 0.401 | Time: 0:08:49
+Ep 2080 | Reward: 1267.20 | Score:   1153 | Tile:   64 | ε: 0.400 | Time: 0:09:16
+Ep 2090 | Reward: 1277.52 | Score:   1169 | Tile:  128 | ε: 0.399 | Time: 0:10:32
+Ep 2080 | Reward: 1286.59 | Score:   1205 | Tile:   32 | ε: 0.399 | Time: 0:10:08
+Ep 2090 | Reward: 1225.84 | Score:   1161 | Tile:  128 | ε: 0.398 | Time: 0:11:21
+Ep 2100 | Reward: 1245.79 | Score:   1156 | MA-100:   1106 (best   1106, Δ=  +0.0) | Tile:   64 | ε: 0.397 | No-Imp: 0 | Time: 0:11:48
+
+[SAVE] Final model saved: models/DQN/dqn_final.pth
+[SAVE] Training plot saved: evaluations/DQN_training_plot.png
+
+================================================================================
+Training Complete!
+Total Episodes: 2100
+Total Time: 0:11:48
+Best Score: 2820
+Best Tile: 256
+================================================================================
+
+Ep 2100 | Reward: 1214.95 | Score:   1177 | MA-100:   1181 (best   1181, Δ=  +0.0) | Tile:  128 | ε: 0.396 | No-Imp: 0 | Time: 0:12:13
+
+[SAVE] Final model saved: models/DQN/dqn_final.pth
+[SAVE] Training plot saved: evaluations/DQN_training_plot.png
+
+================================================================================
+Training Complete!
+Total Episodes: 2100
+Total Time: 0:12:13
+Best Score: 3096
+Best Tile: 256
+================================================================================
+
+================================================================================
+TRAINING DQN AGENT
+================================================================================
+
+Training for maximum 10000 episodes
+Early stopping: Will stop if moving average doesn't improve for 1000 episodes
+Models will be saved to: models/DQN
+Close plot window to stop early
+
+[NEW BEST] Ep    1 | New best score: 588 | Tile: 64
+[NEW BEST] Ep    2 | New best score: 1476 | Tile: 128
+[NEW BEST] Ep    8 | New best score: 1644 | Tile: 128
+Ep   10 | Reward:  926.98 | Score:   1080 | Tile:  128 | ε: 0.995 | Time: 0:00:32
+[NEW BEST] Ep   12 | New best score: 2524 | Tile: 256
+Ep   20 | Reward:  882.14 | Score:    994 | Tile:  128 | ε: 0.991 | Time: 0:01:10
+Ep   30 | Reward:  850.82 | Score:    962 | Tile:   64 | ε: 0.987 | Time: 0:01:49
+================================================================================
+TRAINING DQN AGENT
+================================================================================
+
+Training for maximum 10000 episodes
+Early stopping: Will stop if moving average doesn't improve for 1000 episodes
+Models will be saved to: models/DQN
+Close plot window to stop early
+
+[NEW BEST] Ep 2001 | New best score: 2772 | Tile: 256
+Ep 2010 | Reward: 1312.36 | Score:   1183 | Tile:   64 | ε: 0.410 | Time: 0:00:49
+Ep   40 | Reward:  906.54 | Score:   1008 | Tile:  128 | ε: 0.982 | Time: 0:03:00
+[NEW BEST] Ep   42 | New best score: 3032 | Tile: 256
+Ep 2020 | Reward: 1166.12 | Score:   1096 | Tile:  128 | ε: 0.408 | Time: 0:02:01
+Ep   50 | Reward:  961.36 | Score:   1047 | Tile:   64 | ε: 0.977 | Time: 0:04:16
+[NEW BEST] Ep 2030 | New best score: 2828 | Tile: 256
+Ep 2030 | Reward: 1205.25 | Score:   1150 | Tile:  256 | ε: 0.407 | Time: 0:03:19
+Ep   60 | Reward: 1006.02 | Score:   1084 | Tile:   64 | ε: 0.972 | Time: 0:05:38
+Ep 2040 | Reward: 1127.46 | Score:   1094 | Tile:  128 | ε: 0.406 | Time: 0:04:25
+Ep   70 | Reward: 1012.76 | Score:   1098 | Tile:   64 | ε: 0.967 | Time: 0:06:45
+Ep 2050 | Reward: 1092.27 | Score:   1063 | Tile:  128 | ε: 0.404 | Time: 0:05:29
+Ep   80 | Reward: 1114.66 | Score:   1187 | Tile:  128 | ε: 0.962 | Time: 0:08:05
+Ep 2060 | Reward: 1064.76 | Score:   1064 | Tile:   64 | ε: 0.403 | Time: 0:06:45
+Ep   90 | Reward: 1105.26 | Score:   1188 | Tile:   64 | ε: 0.958 | Time: 0:09:18
+[NEW BEST] Ep 2065 | New best score: 2940 | Tile: 256
+Ep 2070 | Reward: 1100.14 | Score:   1100 | Tile:   64 | ε: 0.401 | Time: 0:08:02
+Ep  100 | Reward: 1150.13 | Score:   1249 | MA-100:   1148 (best   1148, Δ=  +0.0) | Tile:  128 | ε: 0.952 | No-Imp: 0 | Time: 0:10:45
+
+[SAVE] Final model saved: models/DQN/dqn_final.pth
+[SAVE] Training plot saved: evaluations/DQN_training_plot.png
+
+================================================================================
+Training Complete!
+Total Episodes: 100
+Total Time: 0:10:45
+Best Score: 3032
+Best Tile: 256
+================================================================================
+
+Ep 2080 | Reward: 1069.58 | Score:   1081 | Tile:   32 | ε: 0.400 | Time: 0:09:05
+Ep 2090 | Reward: 1133.51 | Score:   1114 | Tile:  256 | ε: 0.399 | Time: 0:09:47
+Ep 2100 | Reward: 1175.40 | Score:   1158 | MA-100:   1111 (best   1111, Δ=  +0.0) | Tile:  128 | ε: 0.397 | No-Imp: 0 | Time: 0:10:31
+
+[SAVE] Final model saved: models/DQN/dqn_final.pth
+[SAVE] Training plot saved: evaluations/DQN_training_plot.png
+
+================================================================================
+Training Complete!
+Total Episodes: 2100
+Total Time: 0:10:31
+Best Score: 2940
+Best Tile: 256
+================================================================================
+
+================================================================================
+TRAINING DQN AGENT
+================================================================================
+
+Training for maximum 10000 episodes
+Early stopping: Will stop if moving average doesn't improve for 1000 episodes
+Models will be saved to: models/DQN
+Close plot window to stop early
+
+[NEW BEST] Ep    1 | New best score: 1000 | Tile: 128
+[NEW BEST] Ep    2 | New best score: 1096 | Tile: 128
+[NEW BEST] Ep    3 | New best score: 1276 | Tile: 128
+[NEW BEST] Ep    6 | New best score: 1452 | Tile: 128
+Ep   10 | Reward:  890.42 | Score:    934 | Tile:   64 | ε: 0.996 | Time: 0:00:08
+[NEW BEST] Ep   17 | New best score: 1648 | Tile: 128
+Ep   20 | Reward:  887.34 | Score:    942 | Tile:   64 | ε: 0.991 | Time: 0:00:20
+Ep   30 | Reward:  869.70 | Score:    939 | Tile:  128 | ε: 0.987 | Time: 0:00:30
