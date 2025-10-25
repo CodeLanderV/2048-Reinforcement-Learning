@@ -1,0 +1,51 @@
+# Configuration file for DQN 2048 Training
+# Edit these values to customize training
+
+# Training Configuration
+episodes: 1000
+max_steps_per_episode: 10000
+save_frequency: 100  # Save model every N episodes
+
+# DQN Hyperparameters
+learning_rate: 0.0001
+gamma: 0.99  # Discount factor
+epsilon_start: 1.0
+epsilon_end: 0.01
+epsilon_decay: 0.995
+
+# Network Architecture
+hidden_layer_sizes: [256, 256, 128]
+
+# Experience Replay
+batch_size: 64
+replay_buffer_capacity: 100000
+target_network_update_frequency: 10
+
+# Visualization
+enable_visualization: false
+visualization_frequency: 10  # Show every N episodes
+visualization_fps: 10
+
+# Model Naming
+model_name: "dqn_2048"
+
+# Hyperparameter Presets
+# Uncomment one of these to use a preset configuration
+
+# Fast Training (for testing)
+# episodes: 100
+# epsilon_decay: 0.99
+# batch_size: 32
+
+# Balanced Training (recommended)
+# episodes: 2000
+# learning_rate: 0.0001
+# epsilon_decay: 0.995
+# batch_size: 64
+
+# Deep Training (best results)
+# episodes: 5000
+# learning_rate: 0.00005
+# epsilon_decay: 0.999
+# batch_size: 128
+# hidden_layer_sizes: [512, 256, 128]
