@@ -34,8 +34,11 @@ class MockNumpy:
                     flat.extend(row)
                 else:
                     flat.append(row)
-            return max(flat) if flat else 0
-        return max(arr) if arr else 0
+            # Use __builtins__.max to avoid recursion
+            import builtins
+            return builtins.max(flat) if flat else 0
+        import builtins
+        return builtins.max(arr) if arr else 0
     
     @staticmethod
     def where(condition):
