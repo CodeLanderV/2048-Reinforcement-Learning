@@ -14,8 +14,7 @@ To design, build, and train Reinforcement Learning agents capable of playing the
 
 ### Implemented
 - [ ] **DQN** (Deep Q-Network)
-- [ ] **PPO** (Proximal Policy Optimization)
-- [ ] **A3C** (Asynchronous Advantage Actor-Critic)
+
 - monte carlo shit
 
 ## 👥 Authors
