@@ -178,35 +178,68 @@ class GameEnvironment:
                 )
         
         # ─────────────────────────────────────────────────────────────────
-        # Execute move and calculate reward
+        # Execute move and calculate reward with CORNER STRATEGY
         # ─────────────────────────────────────────────────────────────────
         result = self.board.step(direction)
         moved = result.moved  # Did board change?
         
-        # Base reward = raw score gain from merges
-        # Keep it simple - direct score is already logarithmic (2+2=4, 4+4=8, etc)
+        # Base reward = raw score gain from merges (always positive reinforcement for progress)
         base_reward = float(result.score_gain)
-        
         reward = base_reward
         
         # Penalty for invalid moves (hits wall, no tiles merge)
         if not moved:
             reward += self.config.invalid_move_penalty
         else:
-            # Small bonus for maintaining empty cells (encourages avoiding clutter)
-            empty_cells = len(self.board.get_empty_cells())
-            if empty_cells >= 4:  # Only reward if board isn't too full
-                reward += empty_cells * 0.2  # Reduced from 0.5
-            
-            # Bonus for keeping highest tile in a corner (key 2048 strategy)
+            grid = self.board.grid
             max_tile = self.board.max_tile()
-            if max_tile >= 64:  # Only apply for tiles 64+
-                grid = self.board.grid
-                corners = [grid[0, 0], grid[0, 3], grid[3, 0], grid[3, 3]]
-                if max_tile in corners:
-                    # Reward scales with tile value (higher tiles = more important)
-                    corner_bonus = np.log2(max_tile) * 2.0  # e.g., 256 tile = log2(256)*2 = 16 points
-                    reward += corner_bonus
+            empty_cells = len(self.board.get_empty_cells())
+            
+            # ═════════════════════════════════════════════════════════════
+            # CORNER STRATEGY REWARDS
+            # ═════════════════════════════════════════════════════════════
+            
+            # 1. CORNER LOCKING: Massive reward for keeping max tile in a corner
+            corners = [(0, 0), (0, 3), (3, 0), (3, 3)]
+            corner_values = [grid[r, c] for r, c in corners]
+            max_in_corner = max_tile in corner_values
+            
+            if max_tile >= 32:  # Start enforcing corner strategy early
+                if max_in_corner:
+                    # Exponential reward - higher tiles = much more important
+                    corner_reward = np.log2(max_tile) ** 1.5 * 3.0
+                    reward += corner_reward
+                else:
+                    # Strong penalty for max tile NOT in corner (encourage fixing immediately)
+                    corner_penalty = -np.log2(max_tile) * 2.0
+                    reward += corner_penalty
+            
+            # 2. SNAKE PATTERN: Reward monotonic decreasing rows/columns
+            if max_tile >= 64:
+                snake_bonus = self._calculate_snake_bonus(grid, max_tile)
+                reward += snake_bonus
+            
+            # 3. EDGE ALIGNMENT: Reward keeping high-value tiles on edges
+            if max_tile >= 128:
+                edge_bonus = self._calculate_edge_bonus(grid)
+                reward += edge_bonus
+            
+            # 4. TILE ORDERING: Reward having tiles in descending order near max tile
+            if max_tile >= 256:
+                order_bonus = self._calculate_order_bonus(grid, max_tile)
+                reward += order_bonus
+            
+            # 5. EMPTY SPACE MANAGEMENT: Reward maintaining breathing room
+            if empty_cells >= 3:
+                empty_bonus = empty_cells * 0.5
+                reward += empty_bonus
+            elif empty_cells <= 1:
+                # Penalty for getting too cramped (risky position)
+                reward -= 2.0
+            
+            # 6. MERGE POTENTIAL: Small reward for having adjacent equal tiles
+            merge_potential = self._count_merge_potential(grid)
+            reward += merge_potential * 0.3
         
         # Update tracking and build new state
         self._last_score = self.board.score
@@ -276,6 +309,186 @@ class GameEnvironment:
     # Helper Methods
     # ───────────────────────────────────────────────────────────────────────
 
+    def _calculate_snake_bonus(self, grid: np.ndarray, max_tile: int) -> float:
+        """
+        Reward snake pattern: monotonically decreasing values from corner.
+        
+        Checks all four corners and rewards the best snake pattern found.
+        Snake pattern means tiles decrease in value as you move away from corner.
+        
+        Args:
+            grid: 4x4 board grid
+            max_tile: Highest tile value
+            
+        Returns:
+            Bonus reward for good snake patterns
+        """
+        best_score = 0.0
+        
+        # Check all 4 corners for snake patterns
+        patterns = [
+            # Top-left corner: scan right then snake down
+            [(0, 0), (0, 1), (0, 2), (0, 3), (1, 3), (1, 2), (1, 1), (1, 0)],
+            # Top-right corner: scan left then snake down  
+            [(0, 3), (0, 2), (0, 1), (0, 0), (1, 0), (1, 1), (1, 2), (1, 3)],
+            # Bottom-left corner: scan right then snake up
+            [(3, 0), (3, 1), (3, 2), (3, 3), (2, 3), (2, 2), (2, 1), (2, 0)],
+            # Bottom-right corner: scan left then snake up
+            [(3, 3), (3, 2), (3, 1), (3, 0), (2, 0), (2, 1), (2, 2), (2, 3)],
+        ]
+        
+        for pattern in patterns:
+            score = 0.0
+            prev_val = float('inf')
+            
+            for r, c in pattern:
+                val = grid[r, c]
+                if val == 0:
+                    continue
+                    
+                # Reward if tiles decrease monotonically
+                if val <= prev_val:
+                    # Bigger tiles = bigger reward for proper ordering
+                    score += np.log2(val) if val > 0 else 0
+                else:
+                    # Penalty for breaking the snake (tile is bigger than previous)
+                    score -= 2.0
+                    
+                prev_val = val
+            
+            best_score = max(best_score, score)
+        
+        return best_score * 0.5  # Scale down to reasonable range
+    
+    def _calculate_edge_bonus(self, grid: np.ndarray) -> float:
+        """
+        Reward keeping high-value tiles on edges (not in center).
+        
+        Center tiles are harder to merge and block movement.
+        Edge tiles maintain flexibility.
+        
+        Args:
+            grid: 4x4 board grid
+            
+        Returns:
+            Bonus for good edge alignment
+        """
+        bonus = 0.0
+        
+        # Get all edge positions
+        edges = (
+            [(0, c) for c in range(4)] +  # Top row
+            [(3, c) for c in range(4)] +  # Bottom row
+            [(r, 0) for r in range(1, 3)] +  # Left column (excluding corners)
+            [(r, 3) for r in range(1, 3)]    # Right column (excluding corners)
+        )
+        
+        # Get center positions
+        center = [(1, 1), (1, 2), (2, 1), (2, 2)]
+        
+        # Calculate average tile value on edges vs center
+        edge_vals = [grid[r, c] for r, c in edges if grid[r, c] > 0]
+        center_vals = [grid[r, c] for r, c in center if grid[r, c] > 0]
+        
+        if edge_vals and center_vals:
+            avg_edge = np.mean([np.log2(v) for v in edge_vals])
+            avg_center = np.mean([np.log2(v) for v in center_vals])
+            
+            # Reward if edges have higher average value than center
+            if avg_edge > avg_center:
+                bonus = (avg_edge - avg_center) * 2.0
+        
+        return bonus
+    
+    def _calculate_order_bonus(self, grid: np.ndarray, max_tile: int) -> float:
+        """
+        Reward having tiles near max tile in descending order.
+        
+        Checks the row/column containing max tile for monotonicity.
+        
+        Args:
+            grid: 4x4 board grid
+            max_tile: Highest tile value
+            
+        Returns:
+            Bonus for proper tile ordering
+        """
+        # Find max tile position
+        max_pos = np.argwhere(grid == max_tile)
+        if len(max_pos) == 0:
+            return 0.0
+        
+        r, c = max_pos[0]
+        bonus = 0.0
+        
+        # Check row containing max tile for monotonicity
+        row = grid[r, :]
+        row_bonus = self._check_monotonicity(row)
+        
+        # Check column containing max tile for monotonicity
+        col = grid[:, c]
+        col_bonus = self._check_monotonicity(col)
+        
+        bonus = max(row_bonus, col_bonus)
+        return bonus * 2.0
+    
+    def _check_monotonicity(self, line: np.ndarray) -> float:
+        """
+        Check if a line of tiles is monotonically decreasing.
+        
+        Args:
+            line: 1D array of tile values
+            
+        Returns:
+            Score for monotonicity (higher = more monotonic)
+        """
+        score = 0.0
+        non_zero = line[line > 0]
+        
+        if len(non_zero) <= 1:
+            return 0.0
+        
+        # Check both directions (left-to-right and right-to-left)
+        decreasing_score = 0.0
+        increasing_score = 0.0
+        
+        for i in range(len(non_zero) - 1):
+            if non_zero[i] >= non_zero[i + 1]:
+                decreasing_score += 1.0
+            if non_zero[i] <= non_zero[i + 1]:
+                increasing_score += 1.0
+        
+        # Return best monotonicity direction
+        return max(decreasing_score, increasing_score)
+    
+    def _count_merge_potential(self, grid: np.ndarray) -> int:
+        """
+        Count pairs of adjacent equal tiles (potential merges).
+        
+        More merge potential = more flexibility for next moves.
+        
+        Args:
+            grid: 4x4 board grid
+            
+        Returns:
+            Number of adjacent tile pairs that can merge
+        """
+        count = 0
+        
+        # Check horizontal adjacents
+        for r in range(4):
+            for c in range(3):
+                if grid[r, c] > 0 and grid[r, c] == grid[r, c + 1]:
+                    count += 1
+        
+        # Check vertical adjacents
+        for r in range(3):
+            for c in range(4):
+                if grid[r, c] > 0 and grid[r, c] == grid[r + 1, c]:
+                    count += 1
+        
+        return count
+
     def _build_state(self, board: np.ndarray) -> np.ndarray:
         """
         Convert raw board to neural network input format.
@@ -283,22 +496,24 @@ class GameEnvironment:
         Transformation:
             - Raw board: [[2, 4], [8, 0], ...] (tile values)
             - Log2:      [[1, 2], [3, 0], ...] (log2 of values)
-            - Normalize: [[0.09, 0.18], [0.27, 0], ...] (divide by 11.0 for 2048 tile)
-            - Flatten:   [0.09, 0.18, 0.27, 0, ...] (16D vector)
+            - Normalize: [[0.06, 0.13], [0.19, 0], ...] (divide by 15.0 for 32768 tile)
+            - Flatten:   [0.06, 0.13, 0.19, 0, ...] (16D vector)
         
         This normalization helps neural networks learn better by keeping
-        values in a normalized [0, 1] range where 1.0 represents a 2048 tile.
+        values in a normalized [0, ~1] range. Using 15.0 (log2(32768)) allows
+        tiles beyond 2048 without exceeding 1.0.
         
         Args:
             board: 4x4 numpy array of tile values
         
         Returns:
-            Flattened log2-normalized state (16D float32 vector, range [0, 1])
+            Flattened log2-normalized state (16D float32 vector, range [0, ~1])
         """
         with np.errstate(divide="ignore"):  # Ignore log2(0) warnings
             log_board = np.where(board > 0, np.log2(board), 0.0)
-        # Normalize by 11.0 (log2(2048)) to keep values in [0, 1] range
-        normalized = (log_board / 11.0).astype(np.float32)
+        # Normalize by 15.0 (log2(32768)) to handle tiles beyond 2048
+        # 2048 tile = 11/15 = 0.73, 4096 = 12/15 = 0.8, etc.
+        normalized = (log_board / 15.0).astype(np.float32)
         return normalized.flatten()
 
     @staticmethod
