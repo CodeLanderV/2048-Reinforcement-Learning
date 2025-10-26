@@ -84,19 +84,16 @@ class DQNAgent:
             return int(np.random.randint(0, len(self.action_space)))
         
         with torch.no_grad():
-            # Use torch.as_tensor for faster CPU->GPU transfer (avoids copy if possible)
-            state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+            state_tensor = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
             q_values = self.policy_net(state_tensor)
-            # Use .cpu() before .item() to avoid device synchronization overhead
-            return int(q_values.argmax(dim=1).cpu().item())
+            return int(torch.argmax(q_values, dim=1).item())
 
     def act_greedy(self, state: np.ndarray) -> int:
         """Select best action (no exploration)."""
         with torch.no_grad():
-            # Use torch.as_tensor for faster CPU->GPU transfer
-            state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+            state_tensor = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
             q_values = self.policy_net(state_tensor)
-            return int(q_values.argmax(dim=1).cpu().item())
+            return int(torch.argmax(q_values, dim=1).item())
 
     def store_transition(self, *transition) -> None:
         """Store experience in replay buffer."""
@@ -115,12 +112,12 @@ class DQNAgent:
         transitions = self.replay_buffer.sample(self.agent_config.batch_size)
         batch = Transition(*zip(*transitions))
 
-        # Convert to tensors - use torch.as_tensor for speed
-        state_batch = torch.as_tensor(np.stack(batch.state), dtype=torch.float32, device=self.device)
-        action_batch = torch.as_tensor(batch.action, dtype=torch.int64, device=self.device).unsqueeze(1)
-        reward_batch = torch.as_tensor(batch.reward, dtype=torch.float32, device=self.device).unsqueeze(1)
-        next_state_batch = torch.as_tensor(np.stack(batch.next_state), dtype=torch.float32, device=self.device)
-        done_batch = torch.as_tensor(batch.done, dtype=torch.float32, device=self.device).unsqueeze(1)
+        # Convert to tensors
+        state_batch = torch.tensor(np.stack(batch.state), dtype=torch.float32, device=self.device)
+        action_batch = torch.tensor(batch.action, dtype=torch.int64, device=self.device).unsqueeze(1)
+        reward_batch = torch.tensor(batch.reward, dtype=torch.float32, device=self.device).unsqueeze(1)
+        next_state_batch = torch.tensor(np.stack(batch.next_state), dtype=torch.float32, device=self.device)
+        done_batch = torch.tensor(batch.done, dtype=torch.float32, device=self.device).unsqueeze(1)
 
         # Compute Q-values
         current_q_values = self.policy_net(state_batch).gather(1, action_batch)
@@ -139,8 +136,7 @@ class DQNAgent:
         if self.steps_done % self.agent_config.target_update_interval == 0:
             self.update_target_network()
         
-        # Avoid synchronization - only get loss value when needed
-        return float(loss.detach().cpu().item())
+        return float(loss.item())
 
     def update_target_network(self) -> None:
         """Copy policy network weights to target network."""

@@ -31,22 +31,46 @@ import re
 sys.path.insert(0, str(Path(__file__).parent))
 warnings.filterwarnings('ignore', category=RuntimeWarning)
 
-# Import new logging and plotting systems
-from src.logging_system import (
-    setup_logging, log_main, log_training, log_testing,
-    log_training_session_start, log_training_session_end,
-    log_checkpoint, log_evaluation_game, log_evaluation_summary
-)
-from src.metrics_logger import MetricsLogger
-from src.plot_from_logs import plot_training_metrics
-from src.plotting import EvaluationPlotter
-
 # Try importing Optuna (optional for hyperparameter tuning)
 try:
     import optuna
     OPTUNA_AVAILABLE = True
 except ImportError:
     OPTUNA_AVAILABLE = False
+
+# Setup logging to capture all output
+def setup_logging():
+    """Setup logging to both console and file."""
+    log_dir = Path(__file__).parent / "evaluations"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / "logs.txt"
+    
+    # Create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Setup file handler
+    file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    
+    # Setup console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    
+    # Setup root logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+# Initialize logging
+logger = setup_logging()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -69,39 +93,39 @@ CONFIG = {
     # These settings are research-proven and optimized for 2048
     "dqn": {
         # Neural network training
-        "learning_rate": 1e-4,          # Optimal for 2048's large state space
+        "learning_rate": 1e-4,          # Reduced from 3e-4 to prevent overfitting
         "gamma": 0.99,                  # Discount factor for future rewards
-        "batch_size": 256,              # Balanced: stability + throughput
-        "gradient_clip": 1.0,           # Tighter clip prevents destabilization
+        "batch_size": 512,              # Samples per training step (increased for stability)
+        "gradient_clip": 5.0,           # Prevents gradient explosion
         "hidden_dims": (512, 512, 256), # Neural network architecture (deeper and wider)
         
         # Exploration schedule (ε-greedy)
         "epsilon_start": 1.0,           # Start: 100% random actions (explore)
-        "epsilon_end": 0.01,            # End: 1% exploration (never fully greedy)
-        "epsilon_decay": 300000,        # Slower decay = more thorough exploration
+        "epsilon_end": 0.05,            # Increased from 0.01 to maintain more exploration
+        "epsilon_decay": 250000,        # Increased from 200000 for slower decay
         
         # Experience replay & stability
-        "replay_buffer_size": 100000,   # Sufficient memory without excessive RAM
+        "replay_buffer_size": 500000,  # How many past experiences to remember (increased)
         "target_update_interval": 1000, # Update target network every N steps
     },
     
     # ─────────────────────────────────────────────────────────────────────
     # Double DQN Hyperparameters (Reduces Q-value overestimation bias)
     # ─────────────────────────────────────────────────────────────────────
-    # More aggressive settings since Double DQN is inherently more stable
+    # More exploration since Double DQN is inherently more stable
     "double_dqn": {
-        "learning_rate": 1e-4,
+        "learning_rate": 3e-4,
         "gamma": 0.99,
         "batch_size": 256,
-        "gradient_clip": 1.0,
+        "gradient_clip": 5.0,
         "hidden_dims": (512, 512, 256), # Same improved architecture
         
-        # Slightly faster epsilon decay (Double DQN needs less exploration)
+        # INCREASED exploration vs standard DQN
         "epsilon_start": 1.0,
         "epsilon_end": 0.01,            # Keep 1% randomness
-        "epsilon_decay": 250000,        # Faster than standard DQN
+        "epsilon_decay": 200000,        # Longer decay
         
-        "replay_buffer_size": 100000,
+        "replay_buffer_size": 200_000,
         "target_update_interval": 1000,
     },
     
@@ -304,10 +328,10 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
     Args:
         algorithm: "dqn" or "double-dqn"
     """
+    import matplotlib.pyplot as plt
     import numpy as np
     from src.environment import GameEnvironment, EnvironmentConfig, ACTIONS
-    from src.utils import TrainingTimer
-    from src.plotting import TrainingPlotter
+    from src.utils import TrainingTimer, EvaluationLogger
     
     # ─────────────────────────────────────────────────────────────────────
     # Setup: Import appropriate agent and configuration
@@ -333,11 +357,9 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
     else:
         raise ValueError(f"Unknown algorithm: {algorithm}")
     
-    # ─────────────────────────────────────────────────────────────────────
-    # Setup: Logging and Configuration
-    # ─────────────────────────────────────────────────────────────────────
-    setup_logging()
-    log_training_session_start(algo_name, CONFIG["episodes"], CONFIG[config_key])
+    print("=" * 80)
+    print(f"TRAINING {algo_name} AGENT")
+    print("=" * 80)
     
     # ─────────────────────────────────────────────────────────────────────
     # Initialize: Agent, Environment, Tracking
@@ -378,23 +400,19 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
     episode_rewards = []
     episode_scores = []
     episode_max_tiles = []
-    episode_steps = []
-    episode_losses = []
     moving_averages = []  # Track 100-episode moving average
     
     # Convergence detection parameters
     convergence_window = 100  # Calculate moving average over 100 episodes
-    convergence_patience = 1000  # Stop if no improvement for 1000 episodes (OPTIMIZED)
+    convergence_patience = 5000  # Stop if no improvement for 5000 episodes
     best_moving_avg = 0
     episodes_since_improvement = 0
     converged = False
     
-    # Initialize metrics logger
-    metrics_logger = MetricsLogger(
-        algorithm=algo_name,
-        save_dir="evaluations",
-        config=cfg
-    )
+    # Setup live plotting (optional)
+    if CONFIG["enable_plots"]:
+        plt.ion()
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
     
     save_dir = Path(CONFIG["save_dir"]) / save_subdir
     episodes = CONFIG["episodes"]
@@ -443,14 +461,14 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
                 # Attempt to extract episode number from filename
                 m = re.search(r"_ep(\d+)\.pth", resume_candidate.name)
                 start_episode = int(m.group(1)) + 1 if m else 1
-                log_main(f"[RESUME] Resuming from checkpoint: {resume_candidate} (next ep {start_episode})")
-                log_main(f"[RESUME] Loaded state - Steps: {agent.steps_done}, Epsilon: {agent.epsilon:.4f}")
+                print(f"[RESUME] Resuming from provided checkpoint: {resume_candidate} (next ep {start_episode})")
+                print(f"[RESUME] Loaded state - Steps: {agent.steps_done}, Epsilon: {agent.epsilon:.4f}")
             except Exception as e:
-                log_main(f"[ERROR] Failed to load checkpoint {resume_candidate}: {e}")
+                print(f"[ERROR] Failed to load resume checkpoint {resume_candidate}: {e}")
                 import traceback
                 traceback.print_exc()
         else:
-            log_main(f"[WARNING] Resume path not found: {resume_candidate} - starting from scratch")
+            print(f"[WARNING] Resume path not found: {resume_candidate} - starting from scratch")
     elif resume_mode in ("latest", "second-last"):
         # Find numbered checkpoint files
         chk_files = list(save_dir.glob(f"{save_prefix}_ep*.pth"))
@@ -498,24 +516,21 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
                     
                     agent.load(candidate)
                     start_episode = _ep_num(candidate) + 1
-                    log_main(f"[RESUME] Resuming from {resume_mode} checkpoint: {candidate} (next ep {start_episode})")
-                    log_main(f"[RESUME] Loaded state - Steps: {agent.steps_done}, Epsilon: {agent.epsilon:.4f}")
+                    print(f"[RESUME] Resuming from {resume_mode} checkpoint: {candidate} (next ep {start_episode})")
+                    print(f"[RESUME] Loaded state - Steps: {agent.steps_done}, Epsilon: {agent.epsilon:.4f}")
                 except Exception as e:
-                    log_main(f"[ERROR] Failed to load checkpoint {candidate}: {e} - starting from scratch")
+                    print(f"[ERROR] Failed to load checkpoint {candidate}: {e} - starting from scratch")
                     import traceback
                     traceback.print_exc()
             else:
-                log_main(f"[WARNING] Not enough checkpoints to resume '{resume_mode}' - starting from scratch")
+                print(f"[WARNING] Not enough checkpoints to resume '{resume_mode}' - starting from scratch")
         else:
-            log_main(f"[WARNING] No checkpoints found in {save_dir} - starting from scratch")
+            print(f"[WARNING] No checkpoints found in {save_dir} - starting from scratch")
     
-    log_main(f"\nTraining for maximum {episodes} episodes")
-    log_main(f"Early stopping: Will stop if moving average doesn't improve for {convergence_patience} episodes")
-    log_main(f"Models will be saved to: {save_dir}")
-    if CONFIG["enable_plots"]:
-        log_main(f"Live plotting enabled - close window to stop early\n")
-    else:
-        log_main(f"Live plotting disabled\n")
+    print(f"\nTraining for maximum {episodes} episodes")
+    print(f"Early stopping: Will stop if moving average doesn't improve for {convergence_patience} episodes")
+    print(f"Models will be saved to: {save_dir}")
+    print(f"Close plot window to stop early\n")
     
     best_score = 0
     best_tile = 0
@@ -529,7 +544,6 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
             state = env.reset()
             done = False
             episode_reward = 0
-            episode_step_count = 0
             
             # Play one full game
             while not done:
@@ -546,48 +560,29 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
                 
                 # Train agent if enough experiences collected
                 if agent.can_optimize():
-                    loss = agent.optimize_model()
-                    if loss is not None:
-                        episode_losses.append(loss)
+                    agent.optimize_model()
                 
                 # Update state and accumulate reward
                 state = result.state
                 episode_reward += result.reward
-                episode_step_count += 1
                 done = result.done
             
             # ─────────────────────────────────────────────────────────────
             # Episode Complete: Track Metrics
             # ─────────────────────────────────────────────────────────────
             info = env.get_state()
-            episode_score = info['score']
-            episode_max_tile = info['max_tile']
-            
             episode_rewards.append(episode_reward)
-            episode_scores.append(episode_score)
-            episode_max_tiles.append(episode_max_tile)
-            episode_steps.append(episode_step_count)
-            
-            # Log to metrics file
-            avg_loss = np.mean(episode_losses[-100:]) if episode_losses else None
-            metrics_logger.log_episode(
-                episode=episode,
-                score=episode_score,
-                max_tile=episode_max_tile,
-                reward=episode_reward,
-                steps=episode_step_count,
-                epsilon=agent.epsilon,
-                loss=avg_loss
-            )
+            episode_scores.append(info['score'])
+            episode_max_tiles.append(info['max_tile'])
 
-            # Report when we hit a new absolute best score
-            if episode_score > best_score:
-                best_score = episode_score
-                print(f"[NEW BEST] Ep {episode:4d} | New best score: {best_score} | Tile: {episode_max_tile}")
+            # Report when we hit a new absolute best score (helps debug plateaus)
+            if info['score'] > best_score:
+                best_score = info['score']
+                print(f"[NEW BEST] Ep {episode:4d} | New best score: {best_score} | Tile: {info['max_tile']}")
             else:
-                best_score = max(best_score, episode_score)
+                best_score = max(best_score, info['score'])
 
-            best_tile = max(best_tile, episode_max_tile)
+            best_tile = max(best_tile, info['max_tile'])
             
             # Calculate 100-episode moving average
             if len(episode_scores) >= convergence_window:
@@ -604,19 +599,18 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
                 # Check if converged
                 if episodes_since_improvement >= convergence_patience:
                     converged = True
-                    log_training(f"\n[CONVERGENCE] Agent converged! No improvement for {convergence_patience} episodes")
-                    log_training(f"[CONVERGENCE] Best moving average: {best_moving_avg:.2f}")
-                    log_training(f"[CONVERGENCE] Stopping training early at episode {episode}\n")
+                    print(f"\n[CONVERGENCE] Agent converged! No improvement for {convergence_patience} episodes")
+                    print(f"[CONVERGENCE] Best moving average: {best_moving_avg:.2f}")
+                    print(f"[CONVERGENCE] Stopping training early at episode {episode}\n")
                     break
             
             # Print progress every 10 episodes
             if episode % 10 == 0:
                 avg_reward = np.mean(episode_rewards[-50:])  # Last 50 episodes
                 avg_score = np.mean(episode_scores[-50:])
-                avg_steps = np.mean(episode_steps[-50:])
                 elapsed = timer.elapsed_str()
                 
-                # Add moving average info if available
+                # Add moving average info if available. Also show best MA and delta for clarity.
                 if moving_averages:
                     cur_ma = moving_averages[-1]
                     ma_delta = cur_ma - best_moving_avg
@@ -626,12 +620,11 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
 
                 convergence_info = f" | No-Imp: {episodes_since_improvement}" if len(episode_scores) >= convergence_window else ""
                 
-                log_training(
+                print(
                     f"Ep {episode:4d} | "
                     f"Reward: {avg_reward:7.2f} | "
                     f"Score: {avg_score:6.0f}{ma_info} | "
                     f"Tile: {episode_max_tiles[-1]:4d} | "
-                    f"Steps: {avg_steps:5.0f} | "
                     f"ε: {agent.epsilon:.3f}{convergence_info} | "
                     f"Time: {elapsed}"
                 )
@@ -641,10 +634,23 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
                 save_dir.mkdir(parents=True, exist_ok=True)
                 checkpoint_path = save_dir / f"{save_prefix}_ep{episode}.pth"
                 agent.save(checkpoint_path, episode)
-                log_checkpoint(episode, str(checkpoint_path))
+                print(f"[CHECKPOINT] Saved: {checkpoint_path}")
+            
+            # Update live plot
+            if CONFIG["enable_plots"] and episode % 5 == 0:
+                _update_training_plot(
+                    ax1, ax2, episode_rewards, episode_scores, 
+                    episode_max_tiles, moving_averages, algo_name
+                )
+                plt.pause(0.01)
+                
+                # Check if user closed plot window (early stop)
+                if not plt.fignum_exists(fig.number):
+                    print("\n[WARNING] Plot closed - stopping early")
+                    break
     
     except KeyboardInterrupt:
-        log_main("\n\n[WARNING] Training interrupted by user")
+        print("\n\n[WARNING] Training interrupted by user")
     
     # ─────────────────────────────────────────────────────────────────────
     # Training Complete: Save and Log Results
@@ -656,51 +662,79 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
         save_dir.mkdir(parents=True, exist_ok=True)
         final_path = save_dir / f"{save_prefix}_final.pth"
         agent.save(final_path, episode)
-        log_main(f"\n[SAVE] Final model saved: {final_path}")
+        print(f"\n[SAVE] Final model saved: {final_path}")
         
-        # Save metrics to JSON
-        metrics_path = metrics_logger.save()
-        log_main(f"[SAVE] Metrics saved: {metrics_path}")
+        # Save training plots
+        if CONFIG["enable_plots"] and plt.fignum_exists(fig.number):
+            plot_path = Path("evaluations") / f"{algo_name.replace(' ', '_')}_training_plot.png"
+            plot_path.parent.mkdir(exist_ok=True)
+            fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+            print(f"[SAVE] Training plot saved: {plot_path}")
         
-        # Generate training plots from metrics
-        try:
-            plot_path = plot_training_metrics(metrics_path)
-            log_main(f"[SAVE] Training plots saved: {plot_path}")
-        except Exception as e:
-            log_main(f"[WARNING] Failed to generate plots: {e}")
+        # Log evaluation to file
+        logger = EvaluationLogger()
+        final_avg_reward = float(np.mean(episode_rewards[-100:])) if episode_rewards else 0.0
         
-        # Log training session end
-        log_training_session_end(
+        logger.log_training(
             algorithm=algo_name,
-            episodes_completed=episode,
-            best_score=best_score,
-            best_tile=best_tile,
+            episodes=episode,
+            final_avg_reward=final_avg_reward,
+            max_tile=best_tile,
+            final_score=best_score,
             training_time=timer.elapsed_str(),
-            converged=converged
+            model_path=str(final_path),
+            notes=f"LR={cfg['learning_rate']}, epsilon_end={cfg['epsilon_end']}, epsilon_decay={cfg['epsilon_decay']}"
         )
         
         # Cleanup
         env.close()
+        if CONFIG["enable_plots"]:
+            plt.ioff()
+            plt.close('all')
         
-        # Print summary to console
-    log_main(f"\n{'='*80}")
-    log_main(f"Training Complete!")
-    if converged:
-        log_main(f"Reason: Converged (no improvement for {convergence_patience} episodes)")
-        log_main(f"Best Moving Average (100ep): {best_moving_avg:.2f}")
-    log_main(f"Total Episodes: {episode}")
-    log_main(f"Total Time: {timer.elapsed_str()}")
-    log_main(f"Best Score: {best_score}")
-    log_main(f"Best Tile: {best_tile}")
+        # Print summary
+        print(f"\n{'='*80}")
+        print(f"Training Complete!")
+        if converged:
+            print(f"Reason: Converged (no improvement for {convergence_patience} episodes)")
+            print(f"Best Moving Average (100ep): {best_moving_avg:.2f}")
+        print(f"Total Episodes: {episode}")
+        print(f"Total Time: {timer.elapsed_str()}")
+        print(f"Best Score: {best_score}")
+        print(f"Best Tile: {best_tile}")
+        print(f"{'='*80}\n")
+
+
+def _update_training_plot(ax1, ax2, rewards, scores, tiles, moving_averages, algo_name):
+    """Helper: Update matplotlib training plots."""
+    import numpy as np
     
-    # Show metrics summary
-    summary = metrics_logger.get_summary()
-    log_main(f"\nTraining Summary:")
-    log_main(f"  Avg Score: {summary.get('avg_score', 0):.1f}")
-    log_main(f"  Avg Tile: {summary.get('avg_max_tile', 0):.0f}")
-    log_main(f"  Avg Reward: {summary.get('avg_reward', 0):.1f}")
-    log_main(f"  Final ε: {summary.get('final_epsilon', 0):.4f}")
-    log_main(f"{'='*80}\n")
+    ax1.clear()
+    ax2.clear()
+    
+    # Plot 1: Scores with moving average (100-episode window)
+    ax1.scatter(range(len(scores)), scores, alpha=0.3, s=10, color='blue', label='Raw Score')
+    if moving_averages:
+        # Moving average starts at episode 100
+        ma_start = 100
+        ax1.plot(range(ma_start - 1, len(scores)), moving_averages, 
+                color='red', linewidth=2, label='MA-100 (Convergence Metric)')
+    ax1.set_xlabel('Episode')
+    ax1.set_ylabel('Score')
+    ax1.set_title(f'{algo_name} Training Progress - Scores (Raw + 100-Episode Moving Average)')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot 2: Max Tiles
+    ax2.plot(scores, alpha=0.3, color='green', label='Score')
+    ax2.plot(tiles, alpha=0.3, color='red', label='Max Tile')
+    ax2.set_xlabel('Episode')
+    ax2.set_ylabel('Value')
+    ax2.set_title(f'{algo_name} Training Progress - Game Metrics')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # ARCHIVED: MCTS & REINFORCE ALGORITHMS
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1075,7 +1109,6 @@ def play_model(model_path=None, episodes=1, use_ui=True):
         use_ui: Show pygame visualization
     """
     from src.environment import GameEnvironment, EnvironmentConfig, ACTIONS
-    from src.plotting import EvaluationPlotter
     
     # Auto-detect model path if not provided
     if model_path is None:
@@ -1084,8 +1117,8 @@ def play_model(model_path=None, episodes=1, use_ui=True):
         model_path = Path(model_path)
     
     if not model_path.exists():
-        log_main(f"[ERROR] Model not found: {model_path}")
-        log_main(f"[INFO] Train a model first: python 2048RL.py train --algorithm dqn")
+        print(f"[ERROR] Model not found: {model_path}")
+        print(f"[INFO] Train a model first: python 2048RL.py train --algorithm dqn")
         return
     
     # Detect algorithm from path
@@ -1095,10 +1128,10 @@ def play_model(model_path=None, episodes=1, use_ui=True):
         """
         from src.agents.reinforce import REINFORCEAgent, REINFORCEConfig
         
-        log_main("=" * 80)
-        log_main(f"PLAYING WITH REINFORCE MODEL")
-        log_main("=" * 80)
-        log_main(f"Model: {model_path}\n")
+        print("=" * 80)
+        print(f"PLAYING WITH REINFORCE MODEL")
+        print("=" * 80)
+        print(f"Model: {model_path}\n")
         
         cfg = CONFIG["reinforce"]
         agent = REINFORCEAgent(
@@ -1121,10 +1154,10 @@ def play_model(model_path=None, episodes=1, use_ui=True):
         config_key = "double_dqn"
         algo_name = "Double DQN"
         
-        log_main("=" * 80)
-        log_main(f"PLAYING WITH {algo_name} MODEL")
-        log_main("=" * 80)
-        log_main(f"Model: {model_path}\n")
+        print("=" * 80)
+        print(f"PLAYING WITH {algo_name} MODEL")
+        print("=" * 80)
+        print(f"Model: {model_path}\n")
         
         # Load agent
         cfg = CONFIG[config_key]
@@ -1158,10 +1191,10 @@ def play_model(model_path=None, episodes=1, use_ui=True):
         config_key = "dqn"
         algo_name = "DQN"
         
-        log_main("=" * 80)
-        log_main(f"PLAYING WITH {algo_name} MODEL")
-        log_main("=" * 80)
-        log_main(f"Model: {model_path}\n")
+        print("=" * 80)
+        print(f"PLAYING WITH {algo_name} MODEL")
+        print("=" * 80)
+        print(f"Model: {model_path}\n")
         
         # Load agent
         cfg = CONFIG[config_key]
@@ -1194,16 +1227,17 @@ def play_model(model_path=None, episodes=1, use_ui=True):
     )
     env = GameEnvironment(env_config)
     
-    # Setup evaluation plotter
-    eval_plotter = EvaluationPlotter()
+    # Setup logging
+    import logging
+    logger = logging.getLogger()
     
     # Log play session start
-    log_main("=" * 80)
-    log_main(f"PLAY SESSION STARTED - Model: {model_path}")
-    log_main(f"Algorithm: {algo_name}")
-    log_main(f"Episodes: {episodes}")
-    log_main(f"UI Enabled: {use_ui}")
-    log_main("=" * 80)
+    logger.info("=" * 80)
+    logger.info(f"PLAY SESSION STARTED - Model: {model_path}")
+    logger.info(f"Algorithm: {algo_name}")
+    logger.info(f"Episodes: {episodes}")
+    logger.info(f"UI Enabled: {use_ui}")
+    logger.info("=" * 80)
     
     # Play episodes
     for ep in range(1, episodes + 1):
@@ -1213,9 +1247,10 @@ def play_model(model_path=None, episodes=1, use_ui=True):
         steps = 0
         
         msg = f"GAME {ep}/{episodes} - Starting"
-        log_testing(f"\n{'='*80}")
-        log_testing(msg)
-        log_testing(f"{'='*80}")
+        print(f"\n{'='*80}")
+        print(msg)
+        print(f"{'='*80}")
+        logger.info(msg)
         
         while not done:
             # Get current board state info
@@ -1232,7 +1267,8 @@ def play_model(model_path=None, episodes=1, use_ui=True):
             # If no valid actions, game is over
             if not valid_actions:
                 game_over_msg = f"Step {steps + 1}: No valid moves available - Game Over!"
-                log_testing(f"\n{game_over_msg}")
+                print(f"\n{game_over_msg}")
+                logger.info(game_over_msg)
                 done = True
                 break
             
@@ -1256,7 +1292,7 @@ def play_model(model_path=None, episodes=1, use_ui=True):
             
             # Print and log step information
             step_msg = f"Step {steps + 1}: Action={action_name.upper()}, Reward={result.reward:+.1f}, Score={info['score']}->{result.info['score']}, MaxTile={result.info['max_tile']}, Empty={result.info['empty_cells']}, Valid={len(valid_actions)}"
-            log_testing(step_msg)
+            logger.info(step_msg)
             
             print(f"\nStep {steps + 1}:")
             print(f"  Action: {action_name.upper()} (Valid: {len(valid_actions)} options)")
@@ -1269,10 +1305,11 @@ def play_model(model_path=None, episodes=1, use_ui=True):
             
             # Print board state (original tile values)
             board_grid = env.board.grid
-            log_testing(f"  Board:")
+            print(f"  Board:")
             for row in board_grid:
                 row_str = ' '.join(f'{int(val):5d}' for val in row)
-                log_testing(f"    {row_str}")
+                print(f"    {row_str}")
+                logger.info(f"    {row_str}")
             
             # Update state
             state = result.state
@@ -1283,7 +1320,8 @@ def play_model(model_path=None, episodes=1, use_ui=True):
             # Safety check: prevent infinite loops
             if steps > 10000:
                 safety_msg = f"[WARNING] Stopping after {steps} steps (safety limit)"
-                log_testing(f"\n{safety_msg}")
+                print(f"\n{safety_msg}")
+                logger.warning(safety_msg)
                 break
             
             # Handle pygame events to prevent freezing
@@ -1292,35 +1330,20 @@ def play_model(model_path=None, episodes=1, use_ui=True):
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         quit_msg = "[INFO] Window closed by user"
-                        log_testing(f"\n{quit_msg}")
+                        print(f"\n{quit_msg}")
+                        logger.info(quit_msg)
                         env.close()
                         return
                     elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                         esc_msg = "[INFO] ESC pressed - stopping playback"
-                        log_testing(f"\n{esc_msg}")
+                        print(f"\n{esc_msg}")
+                        logger.info(esc_msg)
                         env.close()
                         return
         
         # Final game summary
         final_info = env.get_state()
         avg_reward = total_reward/steps if steps > 0 else 0
-        reached_2048 = final_info['max_tile'] >= 2048
-        
-        # Add game to evaluation plotter
-        eval_plotter.add_game(
-            score=final_info['score'],
-            max_tile=final_info['max_tile'],
-            reached_2048=reached_2048
-        )
-        
-        # Log individual game result
-        log_evaluation_game(
-            game_num=ep,
-            score=final_info['score'],
-            max_tile=final_info['max_tile'],
-            steps=steps,
-            reached_2048=reached_2048
-        )
         
         summary_lines = [
             f"GAME {ep}/{episodes} - COMPLETED",
@@ -1331,32 +1354,18 @@ def play_model(model_path=None, episodes=1, use_ui=True):
             f"Average Reward/Step: {avg_reward:.2f}"
         ]
         
-        log_testing(f"\n{'='*80}")
+        print(f"\n{'='*80}")
         for line in summary_lines:
-            log_testing(line)
-        log_testing(f"{'='*80}")
-    
-    # Get evaluation metrics and log summary
-    metrics = eval_plotter.get_metrics()
-    log_evaluation_summary(
-        total_games=metrics['total_games'],
-        avg_score=metrics['avg_score'],
-        max_score=metrics['max_score'],
-        avg_max_tile=metrics['avg_max_tile'],
-        win_rate=metrics['win_rate'],
-        tile_dist=metrics['tile_distribution']
-    )
-    
-    # Generate and save evaluation plots
-    plot_path = Path("evaluations") / f"{algo_name.replace(' ', '_')}_evaluation.png"
-    plot_path.parent.mkdir(exist_ok=True)
-    eval_plotter.plot_and_save(str(plot_path))
-    log_main(f"[SAVE] Evaluation plots saved: {plot_path}")
+            print(line)
+            logger.info(line)
+        print(f"{'='*80}")
+        logger.info("=" * 80)
     
     # Log session end
     final_msg = f"PLAY SESSION COMPLETED - {episodes} game(s) played"
-    log_main(f"\n[INFO] {final_msg}")
-    log_main("=" * 80)
+    print(f"\n[INFO] {final_msg}")
+    logger.info(final_msg)
+    logger.info("=" * 80)
     
     env.close()
 

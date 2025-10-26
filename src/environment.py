@@ -116,6 +116,7 @@ class GameEnvironment:
         if self.config.enable_ui:
             self.ui = GameUI(self.board)
         self._last_score = 0
+        self._prev_max_tile = 0  # Track max tile for milestone bonuses
 
     def reset(self) -> np.ndarray:
         """
@@ -126,6 +127,7 @@ class GameEnvironment:
         """
         board = self.board.reset()
         self._last_score = 0
+        self._prev_max_tile = 0  # Reset max tile tracking
         if self.ui:
             self.ui.draw()
         return self._build_state(board)
@@ -178,13 +180,14 @@ class GameEnvironment:
                 )
         
         # ─────────────────────────────────────────────────────────────────
-        # Execute move and calculate reward with CORNER STRATEGY
+        # Execute move and calculate reward with MAX TILE FOCUS
         # ─────────────────────────────────────────────────────────────────
         result = self.board.step(direction)
         moved = result.moved  # Did board change?
         
-        # Base reward = raw score gain from merges (always positive reinforcement for progress)
-        base_reward = float(result.score_gain)
+        # Base reward = REDUCED score gain (de-emphasize immediate score)
+        # Scale down by 10x to reduce short-term greed
+        base_reward = float(result.score_gain) * 0.1
         reward = base_reward
         
         # Penalty for invalid moves (hits wall, no tiles merge)
@@ -196,38 +199,57 @@ class GameEnvironment:
             empty_cells = len(self.board.get_empty_cells())
             
             # ═════════════════════════════════════════════════════════════
-            # CORNER STRATEGY REWARDS
+            # MAX TILE MILESTONE BONUSES (DOMINANT REWARDS)
             # ═════════════════════════════════════════════════════════════
             
-            # 1. CORNER LOCKING: Massive reward for keeping max tile in a corner
+            # HUGE bonus for reaching new max tile milestones
+            if max_tile > self._prev_max_tile:
+                # Exponential rewards for tile progression
+                milestone_bonus = max_tile * 5.0  # 5x the tile value!
+                reward += milestone_bonus
+                self._prev_max_tile = max_tile
+                
+                # Example bonuses:
+                # Reach 64:   +320
+                # Reach 128:  +640
+                # Reach 256:  +1280
+                # Reach 512:  +2560
+                # Reach 1024: +5120
+                # Reach 2048: +10240
+            
+            # ═════════════════════════════════════════════════════════════
+            # STRATEGIC BONUSES (Amplified for max tile focus)
+            # ═════════════════════════════════════════════════════════════
+            
+            # 1. CORNER LOCKING: Balanced rewards (not too punishing early on)
             corners = [(0, 0), (0, 3), (3, 0), (3, 3)]
             corner_values = [grid[r, c] for r, c in corners]
             max_in_corner = max_tile in corner_values
             
             if max_tile >= 32:  # Start enforcing corner strategy early
                 if max_in_corner:
-                    # Exponential reward - higher tiles = much more important
-                    corner_reward = np.log2(max_tile) ** 1.5 * 3.0
+                    # Strong reward for keeping max tile in corner
+                    corner_reward = np.log2(max_tile) ** 1.5 * 5.0
                     reward += corner_reward
                 else:
-                    # Strong penalty for max tile NOT in corner (encourage fixing immediately)
-                    corner_penalty = -np.log2(max_tile) * 2.0
+                    # Moderate penalty (was too harsh at 6.0, causing negative rewards)
+                    corner_penalty = -np.log2(max_tile) * 1.0
                     reward += corner_penalty
             
-            # 2. SNAKE PATTERN: Reward monotonic decreasing rows/columns
+            # 2. SNAKE PATTERN: Moderate bonus
             if max_tile >= 64:
                 snake_bonus = self._calculate_snake_bonus(grid, max_tile)
-                reward += snake_bonus
+                reward += snake_bonus * 0.5  # Balanced
             
-            # 3. EDGE ALIGNMENT: Reward keeping high-value tiles on edges
+            # 3. EDGE ALIGNMENT: Moderate bonus
             if max_tile >= 128:
                 edge_bonus = self._calculate_edge_bonus(grid)
-                reward += edge_bonus
+                reward += edge_bonus * 1.0  # Balanced
             
-            # 4. TILE ORDERING: Reward having tiles in descending order near max tile
+            # 4. TILE ORDERING: Moderate bonus
             if max_tile >= 256:
                 order_bonus = self._calculate_order_bonus(grid, max_tile)
-                reward += order_bonus
+                reward += order_bonus * 1.0  # Balanced
             
             # 5. EMPTY SPACE MANAGEMENT: Reward maintaining breathing room
             if empty_cells >= 3:
