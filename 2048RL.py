@@ -84,7 +84,7 @@ CONFIG = {
     "algorithm": "dqn",         # Which algorithm: "dqn", "double-dqn", "mcts", "reinforce"
     "episodes": 10000,          # How many games to train on (increased for better results)
     "enable_ui": False,         # Show pygame window? (slower but fun to watch)
-    "enable_plots": True,       # Show live training graphs?
+    "enable_plots": False,      # Show live training graphs? (DISABLED - no real-time plots)
     "hyperparameter_tuning": False,  # Enable hyperparameter search (set to False for faster training)
     
     # ─────────────────────────────────────────────────────────────────────
@@ -93,19 +93,19 @@ CONFIG = {
     # These settings are research-proven and optimized for 2048
     "dqn": {
         # Neural network training
-        "learning_rate": 1e-4,          # Reduced from 3e-4 to prevent overfitting
+        "learning_rate": 3e-4,          # Higher LR for faster learning
         "gamma": 0.99,                  # Discount factor for future rewards
-        "batch_size": 512,              # Samples per training step (increased for stability)
+        "batch_size": 256,              # Balanced batch size
         "gradient_clip": 5.0,           # Prevents gradient explosion
         "hidden_dims": (512, 512, 256), # Neural network architecture (deeper and wider)
         
-        # Exploration schedule (ε-greedy)
+        # Exploration schedule (ε-greedy) - BALANCED DECAY
         "epsilon_start": 1.0,           # Start: 100% random actions (explore)
-        "epsilon_end": 0.05,            # Increased from 0.01 to maintain more exploration
-        "epsilon_decay": 250000,        # Increased from 200000 for slower decay
+        "epsilon_end": 0.01,            # Final: 1% exploration
+        "epsilon_decay": 200000,        # Balanced: 200k steps (was too slow at 250k, too fast at 100k)
         
         # Experience replay & stability
-        "replay_buffer_size": 500000,  # How many past experiences to remember (increased)
+        "replay_buffer_size": 200_000,  # Larger buffer for more diverse experiences
         "target_update_interval": 1000, # Update target network every N steps
     },
     
@@ -129,14 +129,67 @@ CONFIG = {
         "target_update_interval": 1000,
     },
     
+    # ─────────────────────────────────────────────────────────────────────
+    # Dueling DQN Hyperparameters (Separate value/advantage streams)
+    # ─────────────────────────────────────────────────────────────────────
+    # Even more exploration needed due to complex architecture
+    "dueling_dqn": {
+        "learning_rate": 1e-4,
+        "gamma": 0.99,
+        "batch_size": 512,
+        "gradient_clip": 5.0,
+        "hidden_dims": (512, 512),      # Shared feature extractor
+        "stream_dim": 256,               # Dimension of value/advantage streams
+        
+        # LONGEST exploration schedule (complex architecture needs more time)
+        "epsilon_start": 1.0,
+        "epsilon_end": 0.05,
+        "epsilon_decay": 300000,         # Slowest decay for thorough exploration
+        
+        "replay_buffer_size": 500_000,
+        "target_update_interval": 1000,
+    },
    
+    # ─────────────────────────────────────────────────────────────────────
+    # H-DQN Hyperparameters (Hierarchical DQN with online controller training)
+    # ─────────────────────────────────────────────────────────────────────
+    # HIERARCHICAL DQN - OPTIMIZED FOR 2048 ACHIEVEMENT
+    # Manager (Boss): Strategic goal selection
+    # Controller (Worker): Tactical action execution
+    "hdqn": {
+        # MANAGER (BOSS) - Strategic Level
+        "manager_lr": 3e-4,             # Slower learning for stability (was 1e-3)
+        "manager_gamma": 0.99,          # Long-term strategic thinking
+        "manager_hidden": (256, 128),   # Small network for simple goal selection
+        "manager_epsilon_decay": 100000,# Explore longer (was 50k hardcoded)
+        "goal_horizon": 15,             # Controller executes 15 steps per goal (was 10)
+        
+        # CONTROLLER (WORKER) - Tactical Level
+        "learning_rate": 5e-4,          # Fast tactical learning
+        "gamma": 0.99,                  # Standard discount factor
+        "batch_size": 128,              # Fast updates
+        "gradient_clip": 10.0,          # Prevent gradient explosion
+        "hidden_dims": (512, 512, 256), # Large network for complex decisions
+        
+        # Controller exploration - OPTIMIZED
+        "epsilon_start": 1.0,
+        "epsilon_end": 0.01,            # More exploitation (was 0.05)
+        "epsilon_decay": 200000,        # Faster decay (was 250k) - exploit learned behavior
+        
+        # Memory and updates
+        "replay_buffer_size": 150_000,  # Large replay buffer
+        "target_update_interval": 500,  # Frequent target updates
+        
+        # CRITICAL: Intrinsic reward weight
+        "intrinsic_weight": 0.3,        # 30% goal-seeking, 70% score-maximizing (was 0.5)
+    },
     
     # ─────────────────────────────────────────────────────────────────────
     # Environment & Saving
     # ─────────────────────────────────────────────────────────────────────
-    "invalid_move_penalty": -10.0,      # Punishment for invalid moves (prevents getting stuck)
+    "invalid_move_penalty": -100.0,     # STRONG punishment - force agent to avoid invalid moves
     "save_dir": "models",               # Model checkpoint directory
-    "checkpoint_interval": 500,         # Save model every N episodes (less frequent)
+    "checkpoint_interval": 500,         # Save model every 500 episodes (original setting)
     "eval_episodes": 5,                 # Games to play during evaluation
 }
 
@@ -314,6 +367,241 @@ def tune_hyperparameters(algorithm: str, n_trials: int = 30, tune_episodes: int 
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# H-DQN TRAINING (Hierarchical DQN)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def train_hdqn():
+    """Train Hierarchical DQN agent."""
+    import torch
+    import matplotlib
+    matplotlib.use('Agg')  # Non-interactive backend for saving plots
+    import matplotlib.pyplot as plt
+    from src.agents.hierarchical_dqn import HierarchicalDQNAgent, HierarchicalConfig
+    from src.environment import GameEnvironment, EnvironmentConfig
+    from src.utils import TrainingTimer
+    import numpy as np
+    
+    print("=" * 80)
+    print("TRAINING HIERARCHICAL DQN AGENT")
+    print("=" * 80)
+    
+    # Get H-DQN config first
+    from src.agents.dqn import AgentConfig
+    cfg = CONFIG["hdqn"]
+    
+    print("[INFO] H-DQN uses a two-level hierarchy:")
+    print("  - Manager: Selects high-level goals every", cfg["goal_horizon"], "steps")
+    print("  - Controller: Executes actions to achieve goals (intrinsic + extrinsic rewards)")
+    print("  - Manager learning rate:", cfg["manager_lr"])
+    print("  - Controller learning rate:", cfg["learning_rate"])
+    print("=" * 80)
+    
+    # Create controller config
+    controller_config = AgentConfig(
+        gamma=cfg["gamma"],
+        batch_size=cfg["batch_size"],
+        learning_rate=cfg["learning_rate"],
+        epsilon_start=cfg["epsilon_start"],
+        epsilon_end=cfg["epsilon_end"],
+        epsilon_decay=cfg["epsilon_decay"],
+        target_update_interval=cfg["target_update_interval"],
+        replay_buffer_size=cfg["replay_buffer_size"],
+        gradient_clip=cfg["gradient_clip"],
+    )
+    
+    # Create H-DQN agent with manager and controller configs
+    config = HierarchicalConfig(
+        controller_config=controller_config,
+        manager_lr=cfg["manager_lr"],
+        manager_gamma=cfg["manager_gamma"],
+        manager_hidden=cfg["manager_hidden"],
+        manager_epsilon_decay=cfg["manager_epsilon_decay"],
+        goal_horizon=cfg["goal_horizon"],
+        intrinsic_weight=cfg["intrinsic_weight"]
+    )
+    agent = HierarchicalDQNAgent(config)
+    
+    # Print device being used
+    print(f"[DEVICE] Using device: {agent.device}")
+    if torch.cuda.is_available():
+        print(f"[DEVICE] CUDA available: {torch.cuda.get_device_name(0)}")
+        print(f"[DEVICE] CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
+    
+    print(f"\n[INFO] H-DQN controller will learn online during training")
+    print(f"[INFO] Controller uses epsilon-greedy exploration (epsilon decay: {cfg['epsilon_decay']:,} steps)")
+    print(f"[INFO] Balanced exploration: More than DQN due to hierarchical complexity")
+    print(f"[INFO] Expected: 512 tile by ~2k episodes, 1024 by ~4k episodes, 2048 by ~6-8k episodes\n")
+    
+    # Create environment
+    env_config = EnvironmentConfig(enable_ui=False, invalid_move_penalty=-10.0)
+    env = GameEnvironment(env_config)
+    
+    # Attach controller to environment
+    agent.attach_controller(env)
+    
+    print(f"\nTraining for {CONFIG['episodes']} episodes")
+    print(f"Models will be saved to: {config.save_path}\n")
+    
+    best_score = 0
+    best_tile = 0
+    episode_scores = []
+    episode_tiles = []
+    episode_rewards = []  # Track rewards like DQN
+    moving_averages = []  # Track 100-episode moving average like DQN
+    tiles_2048_count = 0  # Count how many times 2048 tile is reached
+    
+    timer = TrainingTimer().start()
+    
+    try:
+        for episode in range(1, CONFIG['episodes'] + 1):
+            # Run hierarchical rollout
+            total_reward, steps = agent.rollout_with_manager(env, max_steps=1000)
+            
+            # Get final state
+            state_info = env.get_state()
+            score = state_info['score']
+            max_tile = state_info['max_tile']
+            
+            episode_scores.append(score)
+            episode_tiles.append(max_tile)
+            episode_rewards.append(total_reward)
+            
+            # Track 2048 tile achievements
+            if max_tile >= 2048:
+                tiles_2048_count += 1
+                print(f"🎉 [2048 ACHIEVED!] Ep {episode:4d} | Score: {score} | This is achievement #{tiles_2048_count}!")
+            
+            # Track best performance - report every new best (like DQN)
+            if score > best_score:
+                best_score = score
+                print(f"[NEW BEST] Ep {episode:4d} | New best score: {best_score} | Tile: {max_tile}")
+            else:
+                best_score = max(best_score, score)
+            
+            best_tile = max(best_tile, max_tile)
+            
+            # Calculate 100-episode moving average for tracking
+            if len(episode_scores) >= 100:
+                moving_avg = sum(episode_scores[-100:]) / 100
+                moving_averages.append(moving_avg)
+            
+            # Log progress every 10 episodes (same format as DQN)
+            if episode % 10 == 0:
+                avg_reward = np.mean(episode_rewards[-50:])  # Last 50 episodes
+                avg_score = np.mean(episode_scores[-50:])
+                elapsed = timer.elapsed_str()
+                
+                # Add moving average info if available
+                if moving_averages:
+                    cur_ma = moving_averages[-1]
+                    ma_info = f" | MA-100: {cur_ma:6.0f}"
+                else:
+                    ma_info = ""
+                
+                print(
+                    f"Ep {episode:4d} | "
+                    f"Reward: {avg_reward:7.2f} | "
+                    f"Score: {avg_score:6.0f}{ma_info} | "
+                    f"Tile: {episode_tiles[-1]:4d} | "
+                    f"Steps: {steps:4d} | "
+                    f"Time: {elapsed}"
+                )
+            
+            # Save checkpoint every 500 episodes (same as DQN)
+            if episode % CONFIG["checkpoint_interval"] == 0:
+                save_path = agent.save(f"hdqn_ep{episode}")
+                print(f"[CHECKPOINT] Saved: {save_path}")
+        
+    except KeyboardInterrupt:
+        print("\n[WARNING] Training interrupted by user")
+    
+    # Save final model
+    final_path = agent.save("hdqn_final")
+    print(f"\n[SAVE] Final model saved: {final_path}")
+    
+    timer.stop()
+    
+    # ─────────────────────────────────────────────────────────────────────
+    # Generate and save post-training plots
+    # ─────────────────────────────────────────────────────────────────────
+    if len(episode_scores) > 0:
+        print("\n[PLOT] Generating training plots...")
+        
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+        fig.suptitle('H-DQN Training Results', fontsize=16, fontweight='bold')
+        
+        episodes_range = range(1, len(episode_scores) + 1)
+        
+        # Plot 1: Scores over time
+        ax1 = axes[0, 0]
+        ax1.plot(episodes_range, episode_scores, alpha=0.3, color='blue', label='Episode Score')
+        if len(episode_scores) >= 50:
+            # 50-episode moving average
+            ma_50 = [np.mean(episode_scores[max(0, i-49):i+1]) for i in range(len(episode_scores))]
+            ax1.plot(episodes_range, ma_50, color='red', linewidth=2, label='MA-50')
+        ax1.set_xlabel('Episode')
+        ax1.set_ylabel('Score')
+        ax1.set_title('Scores Over Time')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot 2: Max tiles over time
+        ax2 = axes[0, 1]
+        ax2.plot(episodes_range, episode_tiles, alpha=0.3, color='green', label='Max Tile')
+        if len(episode_tiles) >= 50:
+            ma_50_tiles = [np.mean(episode_tiles[max(0, i-49):i+1]) for i in range(len(episode_tiles))]
+            ax2.plot(episodes_range, ma_50_tiles, color='orange', linewidth=2, label='MA-50')
+        ax2.set_xlabel('Episode')
+        ax2.set_ylabel('Max Tile')
+        ax2.set_title('Max Tiles Over Time')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        # Plot 3: Score distribution histogram
+        ax3 = axes[1, 0]
+        ax3.hist(episode_scores, bins=30, color='purple', alpha=0.7, edgecolor='black')
+        ax3.axvline(np.mean(episode_scores), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(episode_scores):.1f}')
+        ax3.axvline(np.median(episode_scores), color='green', linestyle='--', linewidth=2, label=f'Median: {np.median(episode_scores):.1f}')
+        ax3.set_xlabel('Score')
+        ax3.set_ylabel('Frequency')
+        ax3.set_title('Score Distribution')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+        
+        # Plot 4: Max tile distribution
+        ax4 = axes[1, 1]
+        unique_tiles, counts = np.unique(episode_tiles, return_counts=True)
+        ax4.bar(range(len(unique_tiles)), counts, tick_label=[str(int(t)) for t in unique_tiles], color='teal', alpha=0.7)
+        ax4.set_xlabel('Max Tile')
+        ax4.set_ylabel('Frequency')
+        ax4.set_title('Max Tile Distribution')
+        ax4.grid(True, alpha=0.3, axis='y')
+        
+        plt.tight_layout()
+        
+        # Save plot
+        plot_dir = Path("evaluations")
+        plot_dir.mkdir(exist_ok=True)
+        plot_path = plot_dir / "H-DQN_training_plot.png"
+        fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+        print(f"[SAVE] Training plot saved: {plot_path}")
+        plt.close(fig)
+    
+    # Print summary
+    print("\n" + "=" * 80)
+    print("TRAINING COMPLETE")
+    print("=" * 80)
+    print(f"Total Episodes: {len(episode_scores)}")
+    print(f"Training Time: {timer.elapsed_str()}")
+    print(f"Best Score: {best_score}")
+    print(f"Best Tile: {best_tile}")
+    print(f"🎉 2048 Tile Achieved: {tiles_2048_count} times")
+    print(f"Avg Score (last 50): {np.mean(episode_scores[-50:]):.1f}")
+    print(f"Avg Tile (last 50): {np.mean(episode_tiles[-50:]):.1f}")
+    print("=" * 80)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # UNIFIED DQN TRAINING (DQN & Double DQN share 95% of code)
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -328,8 +616,11 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
     Args:
         algorithm: "dqn" or "double-dqn"
     """
+    import matplotlib
+    matplotlib.use('Agg')  # Non-interactive backend for saving plots
     import matplotlib.pyplot as plt
     import numpy as np
+    import torch
     from src.environment import GameEnvironment, EnvironmentConfig, ACTIONS
     from src.utils import TrainingTimer, EvaluationLogger
     
@@ -354,6 +645,19 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
         AgentClass = DoubleDQNAgent
         ModelConfigClass = DoubleDQNModelConfig
         AgentConfigClass = DoubleDQNAgentConfig
+    elif algorithm == "dueling-dqn":
+        from src.agents.dueling_dqn import DuelingDQNAgent, DuelingAgentConfig, DuelingDQNModelConfig
+        algo_name = "DUELING DQN"
+        config_key = "dueling_dqn"
+        save_subdir = "DuelingDQN"
+        save_prefix = "dueling_dqn"
+        AgentClass = DuelingDQNAgent
+        ModelConfigClass = DuelingDQNModelConfig
+        AgentConfigClass = DuelingAgentConfig
+    elif algorithm == "hdqn":
+        # H-DQN uses different training loop - call specialized function
+        train_hdqn()
+        return
     else:
         raise ValueError(f"Unknown algorithm: {algorithm}")
     
@@ -368,10 +672,20 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
     
     # Build agent with algorithm-specific config
     cfg = CONFIG[config_key]
-    model_config = ModelConfigClass(
-        output_dim=len(ACTIONS),
-        hidden_dims=cfg["hidden_dims"]
-    )
+    
+    # Handle dueling-dqn's special stream_dim parameter
+    if algorithm == "dueling-dqn":
+        model_config = ModelConfigClass(
+            output_dim=len(ACTIONS),
+            hidden_dims=cfg["hidden_dims"],
+            stream_dim=cfg.get("stream_dim", 256)  # Dueling-specific parameter
+        )
+    else:
+        model_config = ModelConfigClass(
+            output_dim=len(ACTIONS),
+            hidden_dims=cfg["hidden_dims"]
+        )
+    
     agent_config = AgentConfigClass(
         gamma=cfg["gamma"],
         batch_size=cfg["batch_size"],
@@ -389,6 +703,12 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
         action_space=ACTIONS
     )
     
+    # Print device being used
+    print(f"[DEVICE] Using device: {agent.device}")
+    if torch.cuda.is_available():
+        print(f"[DEVICE] CUDA available: {torch.cuda.get_device_name(0)}")
+        print(f"[DEVICE] CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
+    
     # Setup environment with configured penalty
     env_config = EnvironmentConfig(
         enable_ui=CONFIG["enable_ui"],
@@ -404,7 +724,7 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
     
     # Convergence detection parameters
     convergence_window = 100  # Calculate moving average over 100 episodes
-    convergence_patience = 5000  # Stop if no improvement for 5000 episodes
+    convergence_patience = 1000  # Stop if no improvement for 1000 episodes (original setting)
     best_moving_avg = 0
     episodes_since_improvement = 0
     converged = False
@@ -435,10 +755,18 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
                     print(f"[RESUME] Rebuilding agent to match checkpoint architecture...")
                     
                     # Rebuild with checkpoint's architecture
-                    model_config = ModelConfigClass(
-                        output_dim=len(ACTIONS),
-                        hidden_dims=ckpt_hidden
-                    )
+                    if algorithm == "dueling-dqn":
+                        ckpt_stream_dim = ckpt_model_cfg.get('stream_dim', cfg.get("stream_dim", 256))
+                        model_config = ModelConfigClass(
+                            output_dim=len(ACTIONS),
+                            hidden_dims=ckpt_hidden,
+                            stream_dim=ckpt_stream_dim
+                        )
+                    else:
+                        model_config = ModelConfigClass(
+                            output_dim=len(ACTIONS),
+                            hidden_dims=ckpt_hidden
+                        )
                     agent_config = AgentConfigClass(
                         gamma=cfg["gamma"],
                         batch_size=cfg["batch_size"],
@@ -604,7 +932,7 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
                     print(f"[CONVERGENCE] Stopping training early at episode {episode}\n")
                     break
             
-            # Print progress every 10 episodes
+            # Print progress every 10 episodes (restored to original frequent logging)
             if episode % 10 == 0:
                 avg_reward = np.mean(episode_rewards[-50:])  # Last 50 episodes
                 avg_score = np.mean(episode_scores[-50:])
@@ -664,12 +992,70 @@ def train_dqn_variant(algorithm="dqn", resume_mode: str = None, resume_path: str
         agent.save(final_path, episode)
         print(f"\n[SAVE] Final model saved: {final_path}")
         
-        # Save training plots
-        if CONFIG["enable_plots"] and plt.fignum_exists(fig.number):
+        # ─────────────────────────────────────────────────────────────────
+        # Generate and save post-training plots (same as H-DQN)
+        # ─────────────────────────────────────────────────────────────────
+        if len(episode_scores) > 0:
+            print("\n[PLOT] Generating training plots...")
+            
+            fig_post, axes = plt.subplots(2, 2, figsize=(15, 10))
+            fig_post.suptitle(f'{algo_name} Training Results', fontsize=16, fontweight='bold')
+            
+            episodes_range = range(1, len(episode_scores) + 1)
+            
+            # Plot 1: Scores over time
+            ax1 = axes[0, 0]
+            ax1.plot(episodes_range, episode_scores, alpha=0.3, color='blue', label='Episode Score')
+            if len(episode_scores) >= 50:
+                # 50-episode moving average
+                ma_50 = [np.mean(episode_scores[max(0, i-49):i+1]) for i in range(len(episode_scores))]
+                ax1.plot(episodes_range, ma_50, color='red', linewidth=2, label='MA-50')
+            ax1.set_xlabel('Episode')
+            ax1.set_ylabel('Score')
+            ax1.set_title('Scores Over Time')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # Plot 2: Max tiles over time
+            ax2 = axes[0, 1]
+            ax2.plot(episodes_range, episode_max_tiles, alpha=0.3, color='green', label='Max Tile')
+            if len(episode_max_tiles) >= 50:
+                ma_50_tiles = [np.mean(episode_max_tiles[max(0, i-49):i+1]) for i in range(len(episode_max_tiles))]
+                ax2.plot(episodes_range, ma_50_tiles, color='orange', linewidth=2, label='MA-50')
+            ax2.set_xlabel('Episode')
+            ax2.set_ylabel('Max Tile')
+            ax2.set_title('Max Tiles Over Time')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            
+            # Plot 3: Score distribution histogram
+            ax3 = axes[1, 0]
+            ax3.hist(episode_scores, bins=30, color='purple', alpha=0.7, edgecolor='black')
+            ax3.axvline(np.mean(episode_scores), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(episode_scores):.1f}')
+            ax3.axvline(np.median(episode_scores), color='green', linestyle='--', linewidth=2, label=f'Median: {np.median(episode_scores):.1f}')
+            ax3.set_xlabel('Score')
+            ax3.set_ylabel('Frequency')
+            ax3.set_title('Score Distribution')
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+            
+            # Plot 4: Max tile distribution
+            ax4 = axes[1, 1]
+            unique_tiles, counts = np.unique(episode_max_tiles, return_counts=True)
+            ax4.bar(range(len(unique_tiles)), counts, tick_label=[str(int(t)) for t in unique_tiles], color='teal', alpha=0.7)
+            ax4.set_xlabel('Max Tile')
+            ax4.set_ylabel('Frequency')
+            ax4.set_title('Max Tile Distribution')
+            ax4.grid(True, alpha=0.3, axis='y')
+            
+            plt.tight_layout()
+            
+            # Save plot
             plot_path = Path("evaluations") / f"{algo_name.replace(' ', '_')}_training_plot.png"
             plot_path.parent.mkdir(exist_ok=True)
-            fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+            fig_post.savefig(plot_path, dpi=150, bbox_inches='tight')
             print(f"[SAVE] Training plot saved: {plot_path}")
+            plt.close(fig_post)
         
         # Log evaluation to file
         logger = EvaluationLogger()
@@ -1099,14 +1485,16 @@ def _update_training_plot(ax1, ax2, rewards, scores, tiles, moving_averages, alg
 # PLAY MODE - Watch a trained model play
 # ═══════════════════════════════════════════════════════════════════════════
 
-def play_model(model_path=None, episodes=1, use_ui=True):
+def play_model(model_path=None, episodes=1, use_ui=True, target_tile=None, capture_milestones=False):
     """
     Load a trained model and watch it play.
     
     Args:
         model_path: Path to .pth model file (auto-detects algorithm)
-        episodes: Number of games to play
+        episodes: Number of games to play (ignored if target_tile is set)
         use_ui: Show pygame visualization
+        target_tile: Keep playing until this tile is reached (e.g., 2048)
+        capture_milestones: Save board images when reaching new max tiles
     """
     from src.environment import GameEnvironment, EnvironmentConfig, ACTIONS
     
@@ -1122,7 +1510,21 @@ def play_model(model_path=None, episodes=1, use_ui=True):
         return
     
     # Detect algorithm from path
-    if "reinforce" in str(model_path).lower():
+    if "hierarchical" in str(model_path).lower() or "hdqn" in str(model_path).lower():
+        from src.agents.hierarchical_dqn import HierarchicalDQNAgent, HierarchicalConfig
+        
+        print("=" * 80)
+        print(f"PLAYING WITH H-DQN MODEL")
+        print("=" * 80)
+        print(f"Model: {model_path}\n")
+        
+        # Create H-DQN agent
+        config = HierarchicalConfig()
+        agent = HierarchicalDQNAgent(config)
+        algo_name = "H-DQN"
+        is_hdqn = True
+        
+    elif "reinforce" in str(model_path).lower():
         """
         ok this is to load the REINFORCE model into play.
         """
@@ -1145,6 +1547,7 @@ def play_model(model_path=None, episodes=1, use_ui=True):
         )
         agent.load(model_path)
         algo_name = "REINFORCE"
+        is_hdqn = False
         
     elif "double" in str(model_path).lower():
         from src.agents.double_dqn import DoubleDQNAgent, DoubleDQNModelConfig, DoubleDQNAgentConfig
@@ -1182,6 +1585,8 @@ def play_model(model_path=None, episodes=1, use_ui=True):
             action_space=ACTIONS
         )
         agent.load(model_path)
+        algo_name = "Double DQN"
+        is_hdqn = False
         
     else:
         from src.agents.dqn import DQNAgent, DQNModelConfig, AgentConfig
@@ -1219,6 +1624,8 @@ def play_model(model_path=None, episodes=1, use_ui=True):
             action_space=ACTIONS
         )
         agent.load(model_path)
+        algo_name = "DQN"
+        is_hdqn = False
     
     # Setup environment
     env_config = EnvironmentConfig(
@@ -1226,6 +1633,11 @@ def play_model(model_path=None, episodes=1, use_ui=True):
         invalid_move_penalty=CONFIG["invalid_move_penalty"]
     )
     env = GameEnvironment(env_config)
+    
+    # For H-DQN, attach controller and load checkpoint
+    if is_hdqn:
+        agent.attach_controller(env)
+        agent.load(model_path)
     
     # Setup logging
     import logging
@@ -1235,18 +1647,44 @@ def play_model(model_path=None, episodes=1, use_ui=True):
     logger.info("=" * 80)
     logger.info(f"PLAY SESSION STARTED - Model: {model_path}")
     logger.info(f"Algorithm: {algo_name}")
-    logger.info(f"Episodes: {episodes}")
+    if target_tile:
+        logger.info(f"Target Tile: {target_tile} (will play until reached)")
+    else:
+        logger.info(f"Episodes: {episodes}")
     logger.info(f"UI Enabled: {use_ui}")
     logger.info("=" * 80)
     
-    # Play episodes
-    for ep in range(1, episodes + 1):
+    # Play episodes (or until target reached)
+    ep = 0
+    target_reached = False
+    max_tile_achieved = 0  # Track highest tile ever reached for milestone captures
+    
+    # Setup capture directory if needed
+    if capture_milestones:
+        import os
+        from datetime import datetime
+        capture_dir = Path("evaluations") / "board_captures" / datetime.now().strftime("%Y%m%d_%H%M%S")
+        capture_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[INFO] Board captures will be saved to: {capture_dir}\n")
+        logger.info(f"Board captures directory: {capture_dir}")
+    
+    while True:
+        ep += 1
+        
+        # Check if we should stop
+        if target_tile:
+            if target_reached:
+                break
+        else:
+            if ep > episodes:
+                break
+        
         state = env.reset()
         done = False
         total_reward = 0
         steps = 0
         
-        msg = f"GAME {ep}/{episodes} - Starting"
+        msg = f"GAME {ep} - Starting" + (f" (Target: {target_tile})" if target_tile else f"/{episodes}")
         print(f"\n{'='*80}")
         print(msg)
         print(f"{'='*80}")
@@ -1274,16 +1712,22 @@ def play_model(model_path=None, episodes=1, use_ui=True):
             
             # Select best action from valid actions only
             import torch
-            with torch.no_grad():
-                state_tensor = torch.tensor(state, dtype=torch.float32, device=agent.device).unsqueeze(0)
-                q_values = agent.policy_net(state_tensor).squeeze(0)
-                
-                # Mask invalid actions by setting their Q-values to -infinity
-                masked_q_values = torch.full_like(q_values, float('-inf'))
-                for valid_idx in valid_actions:
-                    masked_q_values[valid_idx] = q_values[valid_idx]
-                
-                action = int(torch.argmax(masked_q_values).item())
+            
+            if is_hdqn:
+                # H-DQN uses controller for action selection
+                action = agent.controller.select_action(state)
+            else:
+                # DQN/Double-DQN uses policy network directly
+                with torch.no_grad():
+                    state_tensor = torch.tensor(state, dtype=torch.float32, device=agent.device).unsqueeze(0)
+                    q_values = agent.policy_net(state_tensor).squeeze(0)
+                    
+                    # Mask invalid actions by setting their Q-values to -infinity
+                    masked_q_values = torch.full_like(q_values, float('-inf'))
+                    for valid_idx in valid_actions:
+                        masked_q_values[valid_idx] = q_values[valid_idx]
+                    
+                    action = int(torch.argmax(masked_q_values).item())
             
             action_name = ACTIONS[action]
             
@@ -1310,6 +1754,84 @@ def play_model(model_path=None, episodes=1, use_ui=True):
                 row_str = ' '.join(f'{int(val):5d}' for val in row)
                 print(f"    {row_str}")
                 logger.info(f"    {row_str}")
+            
+            # Capture milestone if reached new max tile
+            current_max = result.info['max_tile']
+            if capture_milestones and current_max > max_tile_achieved:
+                # Check if this is a milestone (power of 2 >= 128)
+                milestones = [128, 256, 512, 1024, 2048, 4096]
+                if current_max in milestones:
+                    max_tile_achieved = current_max
+                    
+                    # Save board as image using matplotlib
+                    import matplotlib.pyplot as plt
+                    import matplotlib
+                    matplotlib.use('Agg')
+                    
+                    fig, ax = plt.subplots(figsize=(8, 8))
+                    
+                    # Create color map for tiles
+                    from matplotlib.colors import LinearSegmentedColormap
+                    colors = ['#cdc1b4', '#eee4da', '#ede0c8', '#f2b179', '#f59563', 
+                              '#f67c5f', '#f65e3b', '#edcf72', '#edcc61', '#edc850',
+                              '#edc53f', '#edc22e']
+                    
+                    # Draw board
+                    for i in range(4):
+                        for j in range(4):
+                            tile_val = int(board_grid[i][j])
+                            
+                            # Color based on tile value
+                            if tile_val == 0:
+                                color = '#cdc1b4'
+                                text_color = '#776e65'
+                            elif tile_val <= 4:
+                                color = '#eee4da'
+                                text_color = '#776e65'
+                            elif tile_val <= 16:
+                                color = '#ede0c8'
+                                text_color = '#776e65'
+                            elif tile_val <= 64:
+                                color = '#f2b179'
+                                text_color = '#f9f6f2'
+                            elif tile_val <= 256:
+                                color = '#f59563'
+                                text_color = '#f9f6f2'
+                            elif tile_val <= 1024:
+                                color = '#f67c5f'
+                                text_color = '#f9f6f2'
+                            else:
+                                color = '#edc22e'
+                                text_color = '#f9f6f2'
+                            
+                            # Draw tile
+                            rect = plt.Rectangle((j, 3-i), 1, 1, facecolor=color, edgecolor='#bbada0', linewidth=2)
+                            ax.add_patch(rect)
+                            
+                            # Draw text
+                            if tile_val > 0:
+                                ax.text(j + 0.5, 3-i + 0.5, str(tile_val), 
+                                       ha='center', va='center', 
+                                       fontsize=24 if tile_val < 1000 else 20,
+                                       fontweight='bold', color=text_color)
+                    
+                    ax.set_xlim(0, 4)
+                    ax.set_ylim(0, 4)
+                    ax.set_aspect('equal')
+                    ax.axis('off')
+                    ax.set_facecolor('#bbada0')
+                    
+                    plt.title(f"Milestone: {current_max} Tile Reached!\nEpisode {ep}, Step {steps}, Score {result.info['score']}", 
+                             fontsize=16, fontweight='bold', pad=20)
+                    
+                    # Save
+                    filename = capture_dir / f"milestone_{current_max}_ep{ep}_step{steps}.png"
+                    plt.savefig(filename, bbox_inches='tight', dpi=150, facecolor='#faf8ef')
+                    plt.close()
+                    
+                    milestone_msg = f"🎉 MILESTONE! {current_max} tile reached - Board saved to {filename}"
+                    print(f"\n{milestone_msg}")
+                    logger.info(milestone_msg)
             
             # Update state
             state = result.state
@@ -1346,13 +1868,18 @@ def play_model(model_path=None, episodes=1, use_ui=True):
         avg_reward = total_reward/steps if steps > 0 else 0
         
         summary_lines = [
-            f"GAME {ep}/{episodes} - COMPLETED",
+            f"GAME {ep} - COMPLETED" + (f" (Target: {target_tile})" if target_tile else f"/{episodes}"),
             f"Final Score: {final_info['score']}",
             f"Max Tile: {final_info['max_tile']}",
             f"Total Steps: {steps}",
             f"Total Reward: {total_reward:.2f}",
             f"Average Reward/Step: {avg_reward:.2f}"
         ]
+        
+        # Check if target reached
+        if target_tile and final_info['max_tile'] >= target_tile:
+            target_reached = True
+            summary_lines.append(f"🎉 TARGET REACHED! {target_tile} tile achieved!")
         
         print(f"\n{'='*80}")
         for line in summary_lines:
@@ -1403,9 +1930,9 @@ Examples:
     train_parser = subparsers.add_parser('train', help='Train an agent')
     train_parser.add_argument(
         '--algorithm', '-a',
-        choices=['dqn', 'double-dqn'],  # MCTS and REINFORCE archived
+        choices=['dqn', 'double-dqn', 'dueling-dqn', 'hdqn'],  # Added H-DQN
         default=CONFIG['algorithm'],
-        help='Algorithm to train (DQN or Double-DQN)'
+        help='Algorithm to train (DQN, Double-DQN, or Dueling-DQN)'
     )
     train_parser.add_argument(
         '--episodes', '-e',
@@ -1465,6 +1992,18 @@ Examples:
         action='store_true',
         help='Disable pygame UI'
     )
+    play_parser.add_argument(
+        '--target-tile',
+        type=int,
+        default=None,
+        choices=[128, 256, 512, 1024, 2048, 4096],
+        help='Keep playing until this tile is reached (ignores --episodes)'
+    )
+    play_parser.add_argument(
+        '--capture-milestones',
+        action='store_true',
+        help='Save board images when reaching new max tiles (128, 256, 512, 1024, 2048)'
+    )
     
     args = parser.parse_args()
     
@@ -1502,7 +2041,7 @@ Examples:
             print("\n[INFO] Skipping hyperparameter tuning, using default/configured parameters\n")
         
         # Run full training with optimized hyperparameters
-        if args.algorithm in ['dqn', 'double-dqn']:
+        if args.algorithm in ['dqn', 'double-dqn', 'dueling-dqn', 'hdqn']:
             # Pass resume options through to training function
             resume_mode = getattr(args, 'resume', None)
             resume_path = getattr(args, 'resume_path', None)
@@ -1522,7 +2061,9 @@ Examples:
         play_model(
             model_path=args.model,
             episodes=args.episodes,
-            use_ui=not args.no_ui
+            use_ui=not args.no_ui,
+            target_tile=args.target_tile if hasattr(args, 'target_tile') else None,
+            capture_milestones=args.capture_milestones if hasattr(args, 'capture_milestones') else False
         )
     
     else:

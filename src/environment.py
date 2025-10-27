@@ -180,88 +180,89 @@ class GameEnvironment:
                 )
         
         # ─────────────────────────────────────────────────────────────────
-        # Execute move and calculate reward with MAX TILE FOCUS
+        # Execute move and calculate SMART reward function
         # ─────────────────────────────────────────────────────────────────
         result = self.board.step(direction)
         moved = result.moved  # Did board change?
         
-        # Base reward = REDUCED score gain (de-emphasize immediate score)
-        # Scale down by 10x to reduce short-term greed
-        base_reward = float(result.score_gain) * 0.1
-        reward = base_reward
-        
-        # Penalty for invalid moves (hits wall, no tiles merge)
+        # Invalid move penalty (strong deterrent)
         if not moved:
-            reward += self.config.invalid_move_penalty
+            reward = self.config.invalid_move_penalty
         else:
             grid = self.board.grid
             max_tile = self.board.max_tile()
             empty_cells = len(self.board.get_empty_cells())
             
             # ═════════════════════════════════════════════════════════════
-            # MAX TILE MILESTONE BONUSES (DOMINANT REWARDS)
+            # COMPONENT 1: Score-based reward (weighted by max tile)
             # ═════════════════════════════════════════════════════════════
+            # Key insight: Same score means MORE with higher max tile
+            # Score of 100 with max=512 is better than score=100 with max=64
             
-            # HUGE bonus for reaching new max tile milestones
+            score_gain = float(result.score_gain)
+            if max_tile >= 64:
+                # Amplify score rewards as max tile increases
+                tile_multiplier = np.log2(max_tile) / 10.0  # 64→0.6, 512→0.9, 1024→1.0
+                score_reward = score_gain * tile_multiplier
+            else:
+                # Early game: smaller multiplier (prevent optimizing for small merges)
+                score_reward = score_gain * 0.2
+            
+            reward = score_reward
+            
+            # ═════════════════════════════════════════════════════════════
+            # COMPONENT 2: Max tile progression bonuses (EXPONENTIAL)
+            # ═════════════════════════════════════════════════════════════
+            # Massive one-time bonuses for reaching new tiles
+            
             if max_tile > self._prev_max_tile:
-                # Exponential rewards for tile progression
-                milestone_bonus = max_tile * 5.0  # 5x the tile value!
+                # Exponential milestone rewards: higher tiles = exponentially better!
+                milestone_bonus = max_tile * 3.0
                 reward += milestone_bonus
                 self._prev_max_tile = max_tile
-                
-                # Example bonuses:
-                # Reach 64:   +320
-                # Reach 128:  +640
-                # Reach 256:  +1280
-                # Reach 512:  +2560
-                # Reach 1024: +5120
-                # Reach 2048: +10240
+                # Examples: 128→+384, 256→+768, 512→+1536, 1024→+3072
             
             # ═════════════════════════════════════════════════════════════
-            # STRATEGIC BONUSES (Amplified for max tile focus)
+            # COMPONENT 3: Corner strategy (POSITIVE REINFORCEMENT ONLY)
             # ═════════════════════════════════════════════════════════════
+            # Only reward good behavior, don't punish exploration
             
-            # 1. CORNER LOCKING: Balanced rewards (not too punishing early on)
             corners = [(0, 0), (0, 3), (3, 0), (3, 3)]
             corner_values = [grid[r, c] for r, c in corners]
             max_in_corner = max_tile in corner_values
             
-            if max_tile >= 32:  # Start enforcing corner strategy early
-                if max_in_corner:
-                    # Strong reward for keeping max tile in corner
-                    corner_reward = np.log2(max_tile) ** 1.5 * 5.0
-                    reward += corner_reward
-                else:
-                    # Moderate penalty (was too harsh at 6.0, causing negative rewards)
-                    corner_penalty = -np.log2(max_tile) * 1.0
-                    reward += corner_penalty
+            if max_tile >= 32 and max_in_corner:
+                # Reward scales with tile value (keeping 512 in corner > keeping 64)
+                corner_bonus = np.log2(max_tile) ** 1.2 * 2.0
+                reward += corner_bonus
+                # Examples: 64→+10, 128→+14, 256→+19, 512→+25, 1024→+33
             
-            # 2. SNAKE PATTERN: Moderate bonus
-            if max_tile >= 64:
-                snake_bonus = self._calculate_snake_bonus(grid, max_tile)
-                reward += snake_bonus * 0.5  # Balanced
+            # ═════════════════════════════════════════════════════════════
+            # COMPONENT 4: Board quality heuristics
+            # ═════════════════════════════════════════════════════════════
             
-            # 3. EDGE ALIGNMENT: Moderate bonus
-            if max_tile >= 128:
-                edge_bonus = self._calculate_edge_bonus(grid)
-                reward += edge_bonus * 1.0  # Balanced
+            # 4a. Empty cells bonus (breathing room = flexibility)
+            if empty_cells >= 4:
+                reward += empty_cells * 1.0
+            elif empty_cells <= 2:
+                # Mild penalty for cramped board (dangerous territory)
+                reward -= (3 - empty_cells) * 1.0
             
-            # 4. TILE ORDERING: Moderate bonus
-            if max_tile >= 256:
-                order_bonus = self._calculate_order_bonus(grid, max_tile)
-                reward += order_bonus * 1.0  # Balanced
-            
-            # 5. EMPTY SPACE MANAGEMENT: Reward maintaining breathing room
-            if empty_cells >= 3:
-                empty_bonus = empty_cells * 0.5
-                reward += empty_bonus
-            elif empty_cells <= 1:
-                # Penalty for getting too cramped (risky position)
-                reward -= 2.0
-            
-            # 6. MERGE POTENTIAL: Small reward for having adjacent equal tiles
+            # 4b. Merge potential (adjacent equal tiles = future opportunities)
             merge_potential = self._count_merge_potential(grid)
-            reward += merge_potential * 0.3
+            if merge_potential >= 3:
+                reward += merge_potential * 0.8
+            
+            # 4c. Monotonicity bonus (tiles in decreasing order = snake pattern)
+            if max_tile >= 128:
+                # Check if board has good monotonic structure
+                monotonicity = self._calculate_monotonicity(grid)
+                reward += monotonicity * 2.0
+            
+            # 4d. Smoothness penalty (large differences between adjacent tiles = bad)
+            if max_tile >= 64:
+                smoothness = self._calculate_smoothness(grid)
+                reward += smoothness * 0.5  # Negative values penalize rough boards
         
         # Update tracking and build new state
         self._last_score = self.board.score
@@ -301,7 +302,7 @@ class GameEnvironment:
                 - board: Raw 4x4 grid (tile values)
                 - log_board: Log2-normalized board
                 - score: Current game score
-                - max_tile: Highest tile value on board
+                - max_tile: HISTORICAL maximum tile achieved during episode (not current board max)
                 - empty_cells: Number of empty spaces
         """
         flat_board = self.board.to_array().astype(np.int32)
@@ -310,7 +311,7 @@ class GameEnvironment:
             "board": flat_board,
             "log_board": log_board,
             "score": self.board.score,
-            "max_tile": self.board.max_tile(),
+            "max_tile": self._prev_max_tile,  # Historical max, not current board max
             "empty_cells": len(self.board.get_empty_cells()),
         }
     
@@ -483,6 +484,31 @@ class GameEnvironment:
         # Return best monotonicity direction
         return max(decreasing_score, increasing_score)
     
+    def _calculate_monotonicity(self, grid: np.ndarray) -> float:
+        """
+        Calculate monotonicity score for entire grid.
+        
+        Checks all rows and columns for monotonic ordering (either increasing 
+        or decreasing). Higher score = more organized board structure.
+        
+        Args:
+            grid: 4x4 board grid
+            
+        Returns:
+            Total monotonicity score across all rows and columns
+        """
+        total_monotonicity = 0.0
+        
+        # Check all rows
+        for r in range(4):
+            total_monotonicity += self._check_monotonicity(grid[r, :])
+        
+        # Check all columns
+        for c in range(4):
+            total_monotonicity += self._check_monotonicity(grid[:, c])
+        
+        return total_monotonicity
+    
     def _count_merge_potential(self, grid: np.ndarray) -> int:
         """
         Count pairs of adjacent equal tiles (potential merges).
@@ -510,6 +536,39 @@ class GameEnvironment:
                     count += 1
         
         return count
+    
+    def _calculate_smoothness(self, grid: np.ndarray) -> float:
+        """
+        Calculate smoothness of the grid (how similar adjacent tiles are).
+        
+        Smoothness measures the difference between adjacent tiles.
+        Lower differences = smoother board = easier to merge tiles.
+        
+        Args:
+            grid: 4x4 board grid
+            
+        Returns:
+            Smoothness score (0 = perfect smoothness, higher = more rough)
+        """
+        smoothness = 0.0
+        
+        # Check horizontal adjacents
+        for r in range(4):
+            for c in range(3):
+                if grid[r, c] > 0 and grid[r, c + 1] > 0:
+                    diff = abs(np.log2(grid[r, c]) - np.log2(grid[r, c + 1]))
+                    smoothness += diff
+        
+        # Check vertical adjacents
+        for r in range(3):
+            for c in range(4):
+                if grid[r, c] > 0 and grid[r + 1, c] > 0:
+                    diff = abs(np.log2(grid[r, c]) - np.log2(grid[r + 1, c]))
+                    smoothness += diff
+        
+        # Return negative (we want to minimize smoothness, so reward low values)
+        # Normalize by dividing by typical smoothness (~40-60)
+        return -smoothness / 50.0
 
     def _build_state(self, board: np.ndarray) -> np.ndarray:
         """

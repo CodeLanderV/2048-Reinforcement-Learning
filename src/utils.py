@@ -96,6 +96,41 @@ class TrainingTimer:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Training Logger (Per-Episode Logging)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TrainingLogger:
+    """
+    Logger for real-time per-episode training progress.
+    
+    Writes timestamped logs to evaluations/mainlog.txt with format:
+        2025-10-26 09:22:33 | [TRAIN] Ep   10 | Reward:  638.49 | Score:   1436 | Tile:  128 | Steps:   168 | ε: 0.994 | Time: 0:00:11
+    """
+    
+    def __init__(self, log_dir: Path = Path("evaluations")):
+        self.log_dir = log_dir
+        self.log_dir.mkdir(exist_ok=True)
+        self.log_file = self.log_dir / "mainlog.txt"
+        
+    def log(self, message: str, prefix: str = ""):
+        """Write timestamped message to log file and console."""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        full_message = f"{timestamp} | {prefix}{message}" if prefix else f"{timestamp} | {message}"
+        
+        # Write to file
+        with open(self.log_file, "a", encoding="utf-8") as f:
+            f.write(full_message + "\n")
+        
+        # Also print to console (without timestamp to avoid clutter)
+        print(f"{prefix}{message}" if prefix else message)
+    
+    def log_episode(self, episode: int, reward: float, score: int, tile: int, steps: int, epsilon: float, elapsed: str):
+        """Log per-episode training stats."""
+        message = f"Ep {episode:4d} | Reward: {reward:7.2f} | Score: {score:6d} | Tile: {tile:4d} | Steps: {steps:5d} | ε: {epsilon:.3f} | Time: {elapsed}"
+        self.log(message, prefix="[TRAIN] ")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Evaluation Logger
 # ═══════════════════════════════════════════════════════════════════════════
 

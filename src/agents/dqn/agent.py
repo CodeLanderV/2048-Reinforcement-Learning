@@ -112,12 +112,12 @@ class DQNAgent:
         transitions = self.replay_buffer.sample(self.agent_config.batch_size)
         batch = Transition(*zip(*transitions))
 
-        # Convert to tensors
-        state_batch = torch.tensor(np.stack(batch.state), dtype=torch.float32, device=self.device)
-        action_batch = torch.tensor(batch.action, dtype=torch.int64, device=self.device).unsqueeze(1)
-        reward_batch = torch.tensor(batch.reward, dtype=torch.float32, device=self.device).unsqueeze(1)
-        next_state_batch = torch.tensor(np.stack(batch.next_state), dtype=torch.float32, device=self.device)
-        done_batch = torch.tensor(batch.done, dtype=torch.float32, device=self.device).unsqueeze(1)
+        # Convert to tensors (use from_numpy for speed)
+        state_batch = torch.from_numpy(np.stack(batch.state).astype(np.float32)).to(self.device)
+        action_batch = torch.from_numpy(np.array(batch.action, dtype=np.int64)).to(self.device).unsqueeze(1)
+        reward_batch = torch.from_numpy(np.array(batch.reward, dtype=np.float32)).to(self.device).unsqueeze(1)
+        next_state_batch = torch.from_numpy(np.stack(batch.next_state).astype(np.float32)).to(self.device)
+        done_batch = torch.from_numpy(np.array(batch.done, dtype=np.float32)).to(self.device).unsqueeze(1)
 
         # Compute Q-values
         current_q_values = self.policy_net(state_batch).gather(1, action_batch)
